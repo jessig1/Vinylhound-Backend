@@ -2,57 +2,34 @@ package main
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"log"
 	"net/http"
-	"os"
-	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/joho/godotenv"
-
-	"vinylhound/internal/app"
+	"vinylhound/internal/store"
 )
 
 func main() {
-	_ = godotenv.Load("config/local.env")
-
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		log.Fatal("DATABASE_URL env var is required")
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	db, err := sql.Open("pgx", dsn)
+	db, err := openDatabase(context.Background(), cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("open database: %v", err)
+		log.Fatal(err)
 	}
 	defer db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
-		log.Fatalf("ping database: %v", err)
+	dataStore := store.New(db)
+
+	if err := bootstrapDemoData(context.Background(), db, dataStore); err != nil {
+		log.Fatal(err)
 	}
 
-	store := app.NewStore(db)
+	handler := newHTTPHandler(cfg, dataStore)
 
-	if err := store.CreateUser("demo", "demo123", []string{
-		"Welcome to Vinylhound!",
-		"Start by customizing your personal playlist.",
-	}); err != nil && !errors.Is(err, app.ErrUserExists) {
-		log.Fatalf("bootstrap demo user: %v", err)
-	}
-
-	server := app.NewServer(store)
-
-	addr := ":8080"
-	if port := os.Getenv("PORT"); port != "" {
-		addr = ":" + port
-	}
-
-	log.Printf("API available at http://localhost%v", addr)
-	if err := http.ListenAndServe(addr, server.Routes()); err != nil {
+	log.Printf("API available at http://localhost%v", cfg.Addr)
+	if err := http.ListenAndServe(cfg.Addr, handler); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
