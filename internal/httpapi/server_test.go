@@ -2,16 +2,37 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"vinylhound/internal/app/artists"
+	"vinylhound/internal/app/songs"
 	"vinylhound/internal/store"
 )
 
-type stubStore struct {
+type stubUserService struct{}
+
+func (stubUserService) Signup(context.Context, string, string, []string) error {
+	return nil
+}
+
+func (stubUserService) Authenticate(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
+func (stubUserService) Content(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
+func (stubUserService) UpdateContent(context.Context, string, []string) error {
+	return nil
+}
+
+type stubAlbumService struct {
 	albumsResponse []store.Album
 	albumsErr      error
 
@@ -24,6 +45,41 @@ type stubStore struct {
 	singleAlbum store.Album
 	singleErr   error
 
+	lastToken string
+}
+
+func (s *stubAlbumService) Create(ctx context.Context, token string, album store.Album) (store.Album, error) {
+	s.lastToken = token
+	s.createdAlbum = album
+	if s.createErr != nil {
+		return store.Album{}, s.createErr
+	}
+	return s.createdAlbum, nil
+}
+
+func (s *stubAlbumService) ListByUser(ctx context.Context, token string) ([]store.Album, error) {
+	s.lastToken = token
+	if s.albumsErr != nil {
+		return nil, s.albumsErr
+	}
+	return s.albumsResponse, nil
+}
+
+func (s *stubAlbumService) List(ctx context.Context, filter store.AlbumFilter) ([]store.Album, error) {
+	if s.listAlbumsErr != nil {
+		return nil, s.listAlbumsErr
+	}
+	return s.listAlbumsResponse, nil
+}
+
+func (s *stubAlbumService) Get(ctx context.Context, id int64) (store.Album, error) {
+	if s.singleErr != nil {
+		return store.Album{}, s.singleErr
+	}
+	return s.singleAlbum, nil
+}
+
+type stubRatingsService struct {
 	preferencesResponse []store.AlbumPreference
 	preferencesErr      error
 
@@ -35,54 +91,7 @@ type stubStore struct {
 	lastToken string
 }
 
-func (s *stubStore) CreateUser(username, password string, content []string) error {
-	return nil
-}
-
-func (s *stubStore) Authenticate(username, password string) (string, error) {
-	return "", nil
-}
-
-func (s *stubStore) ContentByToken(token string) ([]string, error) {
-	return nil, nil
-}
-
-func (s *stubStore) UpdateContentByToken(token string, content []string) error {
-	return nil
-}
-
-func (s *stubStore) CreateAlbum(token string, album store.Album) (store.Album, error) {
-	s.lastToken = token
-	s.createdAlbum = album
-	if s.createErr != nil {
-		return store.Album{}, s.createErr
-	}
-	return s.createdAlbum, nil
-}
-
-func (s *stubStore) AlbumsByToken(token string) ([]store.Album, error) {
-	s.lastToken = token
-	if s.albumsErr != nil {
-		return nil, s.albumsErr
-	}
-	return s.albumsResponse, nil
-}
-
-func (s *stubStore) ListAlbums(filter store.AlbumFilter) ([]store.Album, error) {
-	if s.listAlbumsErr != nil {
-		return nil, s.listAlbumsErr
-	}
-	return s.listAlbumsResponse, nil
-}
-
-func (s *stubStore) AlbumByID(id int64) (store.Album, error) {
-	if s.singleErr != nil {
-		return store.Album{}, s.singleErr
-	}
-	return s.singleAlbum, nil
-}
-
-func (s *stubStore) UpsertAlbumPreference(token string, albumID int64, rating *int, favorited bool) error {
+func (s *stubRatingsService) Upsert(ctx context.Context, token string, albumID int64, rating *int, favorited bool) error {
 	s.lastToken = token
 	s.lastAlbumID = albumID
 	s.lastFavorited = favorited
@@ -98,7 +107,7 @@ func (s *stubStore) UpsertAlbumPreference(token string, albumID int64, rating *i
 	return nil
 }
 
-func (s *stubStore) AlbumPreferencesByToken(token string) ([]store.AlbumPreference, error) {
+func (s *stubRatingsService) ListByUser(ctx context.Context, token string) ([]store.AlbumPreference, error) {
 	s.lastToken = token
 	if s.preferencesErr != nil {
 		return nil, s.preferencesErr
@@ -106,14 +115,36 @@ func (s *stubStore) AlbumPreferencesByToken(token string) ([]store.AlbumPreferen
 	return s.preferencesResponse, nil
 }
 
+type noopArtistService struct{}
+
+func (noopArtistService) List(context.Context, artists.Filter) ([]artists.Artist, error) {
+	return nil, nil
+}
+
+type noopSongService struct{}
+
+func (noopSongService) ListByAlbum(context.Context, int64) ([]songs.Song, error) {
+	return nil, nil
+}
+
+func newTestServer(t *testing.T, album *stubAlbumService, ratings *stubRatingsService) *Server {
+	t.Helper()
+	if album == nil {
+		album = &stubAlbumService{}
+	}
+	if ratings == nil {
+		ratings = &stubRatingsService{}
+	}
+	return New(&stubUserService{}, noopArtistService{}, album, noopSongService{}, ratings)
+}
+
 func TestHandleAlbumsGetSuccess(t *testing.T) {
-	stub := &stubStore{
+	albumStub := &stubAlbumService{
 		albumsResponse: []store.Album{
 			{ID: 1, Artist: "Artist", Title: "Title", ReleaseYear: 2000, Rating: 4},
 		},
 	}
-
-	server := New(stub)
+	server := newTestServer(t, albumStub, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/me/albums", nil)
 	req.Header.Set("Authorization", "Bearer token-123")
 
@@ -133,17 +164,17 @@ func TestHandleAlbumsGetSuccess(t *testing.T) {
 	if len(payload.Albums) != 1 || payload.Albums[0].ID != 1 {
 		t.Fatalf("unexpected albums payload: %#v", payload.Albums)
 	}
-	if stub.lastToken != "token-123" {
-		t.Fatalf("expected token 'token-123', got %q", stub.lastToken)
+	if albumStub.lastToken != "token-123" {
+		t.Fatalf("expected token 'token-123', got %q", albumStub.lastToken)
 	}
 }
 
 func TestHandleAlbumsGetUnauthorized(t *testing.T) {
-	stub := &stubStore{
+	albumStub := &stubAlbumService{
 		albumsErr: store.ErrUnauthorized,
 	}
 
-	server := New(stub)
+	server := newTestServer(t, albumStub, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/me/albums", nil)
 	req.Header.Set("Authorization", "Bearer bad")
 
@@ -156,8 +187,8 @@ func TestHandleAlbumsGetUnauthorized(t *testing.T) {
 }
 
 func TestHandleAlbumsPostSuccess(t *testing.T) {
-	stub := &stubStore{}
-	server := New(stub)
+	albumStub := &stubAlbumService{}
+	server := newTestServer(t, albumStub, nil)
 
 	body := albumRequest{
 		Artist:      "Artist",
@@ -177,19 +208,19 @@ func TestHandleAlbumsPostSuccess(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected status 201, got %d", rr.Code)
 	}
-	if stub.lastToken != "token" {
-		t.Fatalf("expected token 'token', got %q", stub.lastToken)
+	if albumStub.lastToken != "token" {
+		t.Fatalf("expected token 'token', got %q", albumStub.lastToken)
 	}
-	if stub.createdAlbum.Artist != "Artist" || stub.createdAlbum.Rating != 5 {
-		t.Fatalf("unexpected created album: %#v", stub.createdAlbum)
+	if albumStub.createdAlbum.Artist != "Artist" || albumStub.createdAlbum.Rating != 5 {
+		t.Fatalf("unexpected created album: %#v", albumStub.createdAlbum)
 	}
 }
 
 func TestHandleAlbumsPostValidationError(t *testing.T) {
-	stub := &stubStore{
+	albumStub := &stubAlbumService{
 		createErr: store.ErrInvalidAlbum,
 	}
-	server := New(stub)
+	server := newTestServer(t, albumStub, nil)
 
 	body := albumRequest{
 		Artist:      "Artist",
@@ -212,7 +243,7 @@ func TestHandleAlbumsPostValidationError(t *testing.T) {
 }
 
 func TestHandleAlbumsPostMissingToken(t *testing.T) {
-	server := New(&stubStore{})
+	server := newTestServer(t, &stubAlbumService{}, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/me/albums", bytes.NewReader([]byte(`{}`)))
 
 	rr := httptest.NewRecorder()
@@ -224,10 +255,10 @@ func TestHandleAlbumsPostMissingToken(t *testing.T) {
 }
 
 func TestHandleAlbumsPostUnexpectedError(t *testing.T) {
-	stub := &stubStore{
+	albumStub := &stubAlbumService{
 		createErr: errors.New("boom"),
 	}
-	server := New(stub)
+	server := newTestServer(t, albumStub, nil)
 
 	body := albumRequest{
 		Artist:      "Artist",
@@ -250,8 +281,8 @@ func TestHandleAlbumsPostUnexpectedError(t *testing.T) {
 }
 
 func TestHandleAlbumPreferencePut(t *testing.T) {
-	stub := &stubStore{}
-	server := New(stub)
+	ratingsStub := &stubRatingsService{}
+	server := newTestServer(t, &stubAlbumService{}, ratingsStub)
 
 	body := albumPreferenceRequest{
 		Rating:    ptr(4),
@@ -267,17 +298,17 @@ func TestHandleAlbumPreferencePut(t *testing.T) {
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("expected status 204, got %d", rr.Code)
 	}
-	if stub.lastToken != "token" || stub.lastAlbumID != 10 {
-		t.Fatalf("unexpected store call: token=%q albumID=%d", stub.lastToken, stub.lastAlbumID)
+	if ratingsStub.lastToken != "token" || ratingsStub.lastAlbumID != 10 {
+		t.Fatalf("unexpected store call: token=%q albumID=%d", ratingsStub.lastToken, ratingsStub.lastAlbumID)
 	}
-	if stub.lastRating == nil || *stub.lastRating != 4 || !stub.lastFavorited {
-		t.Fatalf("unexpected preference data: rating=%v favorited=%v", stub.lastRating, stub.lastFavorited)
+	if ratingsStub.lastRating == nil || *ratingsStub.lastRating != 4 || !ratingsStub.lastFavorited {
+		t.Fatalf("unexpected preference data: rating=%v favorited=%v", ratingsStub.lastRating, ratingsStub.lastFavorited)
 	}
 }
 
 func TestHandleAlbumPreferenceDelete(t *testing.T) {
-	stub := &stubStore{}
-	server := New(stub)
+	ratingsStub := &stubRatingsService{}
+	server := newTestServer(t, &stubAlbumService{}, ratingsStub)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/me/albums/10/preference", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -288,8 +319,8 @@ func TestHandleAlbumPreferenceDelete(t *testing.T) {
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("expected status 204, got %d", rr.Code)
 	}
-	if stub.lastRating != nil || stub.lastFavorited {
-		t.Fatalf("expected rating nil and favorited false, got rating=%v favorited=%v", stub.lastRating, stub.lastFavorited)
+	if ratingsStub.lastRating != nil || ratingsStub.lastFavorited {
+		t.Fatalf("expected rating nil and favorited false, got rating=%v favorited=%v", ratingsStub.lastRating, ratingsStub.lastFavorited)
 	}
 }
 
@@ -308,8 +339,8 @@ func TestHandleAlbumPreferenceErrorMapping(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			stub := &stubStore{upsertErr: tc.err}
-			server := New(stub)
+			ratingsStub := &stubRatingsService{upsertErr: tc.err}
+			server := newTestServer(t, &stubAlbumService{}, ratingsStub)
 
 			body := albumPreferenceRequest{}
 			b, _ := json.Marshal(body)
@@ -327,7 +358,7 @@ func TestHandleAlbumPreferenceErrorMapping(t *testing.T) {
 }
 
 func TestHandleAlbumPreferenceMissingToken(t *testing.T) {
-	server := New(&stubStore{})
+	server := newTestServer(t, &stubAlbumService{}, &stubRatingsService{})
 	req := httptest.NewRequest(http.MethodPut, "/api/me/albums/10/preference", bytes.NewReader([]byte(`{}`)))
 	rr := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rr, req)
@@ -339,7 +370,7 @@ func TestHandleAlbumPreferenceMissingToken(t *testing.T) {
 
 func TestHandleAlbumPreferencesList(t *testing.T) {
 	rating := 5
-	stub := &stubStore{
+	ratingsStub := &stubRatingsService{
 		preferencesResponse: []store.AlbumPreference{
 			{
 				Album: store.Album{
@@ -354,7 +385,7 @@ func TestHandleAlbumPreferencesList(t *testing.T) {
 			},
 		},
 	}
-	server := New(stub)
+	server := newTestServer(t, &stubAlbumService{}, ratingsStub)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/me/albums/preferences", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -378,7 +409,7 @@ func TestHandleAlbumPreferencesList(t *testing.T) {
 }
 
 func TestHandleAlbumPreferencesUnauthorized(t *testing.T) {
-	server := New(&stubStore{})
+	server := newTestServer(t, &stubAlbumService{}, &stubRatingsService{preferencesErr: store.ErrUnauthorized})
 	req := httptest.NewRequest(http.MethodGet, "/api/me/albums/preferences", nil)
 	rr := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rr, req)
@@ -393,12 +424,12 @@ func ptr[T any](v T) *T {
 }
 
 func TestHandleAlbumsListSuccess(t *testing.T) {
-	stub := &stubStore{
+	albumStub := &stubAlbumService{
 		listAlbumsResponse: []store.Album{
 			{ID: 10, Artist: "Boards of Canada", Title: "Geogaddi", ReleaseYear: 2002, Rating: 5},
 		},
 	}
-	server := New(stub)
+	server := newTestServer(t, albumStub, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/albums?artist=boards&rating=5", nil)
 	rr := httptest.NewRecorder()
@@ -419,7 +450,7 @@ func TestHandleAlbumsListSuccess(t *testing.T) {
 }
 
 func TestHandleAlbumsListBadRating(t *testing.T) {
-	server := New(&stubStore{})
+	server := newTestServer(t, &stubAlbumService{}, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/albums?rating=bad", nil)
 	rr := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rr, req)
@@ -430,10 +461,10 @@ func TestHandleAlbumsListBadRating(t *testing.T) {
 }
 
 func TestHandleAlbumSuccess(t *testing.T) {
-	stub := &stubStore{
+	albumStub := &stubAlbumService{
 		singleAlbum: store.Album{ID: 5, Artist: "Artist"},
 	}
-	server := New(stub)
+	server := newTestServer(t, albumStub, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/album?id=5", nil)
 	rr := httptest.NewRecorder()
@@ -453,10 +484,10 @@ func TestHandleAlbumSuccess(t *testing.T) {
 }
 
 func TestHandleAlbumNotFound(t *testing.T) {
-	stub := &stubStore{
+	albumStub := &stubAlbumService{
 		singleErr: store.ErrAlbumNotFound,
 	}
-	server := New(stub)
+	server := newTestServer(t, albumStub, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/album?id=999", nil)
 	rr := httptest.NewRecorder()

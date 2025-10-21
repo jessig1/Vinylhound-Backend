@@ -4,12 +4,23 @@ import (
 	"net/http"
 	"strings"
 
+	"vinylhound/internal/app/albums"
+	"vinylhound/internal/app/artists"
+	"vinylhound/internal/app/ratings"
+	"vinylhound/internal/app/songs"
+	"vinylhound/internal/app/users"
 	"vinylhound/internal/httpapi"
 	"vinylhound/internal/store"
 )
 
 func newHTTPHandler(cfg Config, dataStore *store.Store) http.Handler {
-	return withCORS(cfg.AllowedOrigins, httpapi.New(dataStore).Routes())
+	userSvc := users.New(dataStore)
+	albumSvc := albums.New(dataStore)
+	ratingsSvc := ratings.New(dataStore)
+	artistSvc := artists.New(albumSvc)
+	songSvc := songs.New(albumSvc)
+
+	return withCORS(cfg.AllowedOrigins, httpapi.New(userSvc, artistSvc, albumSvc, songSvc, ratingsSvc).Routes())
 }
 
 func withCORS(allowedOrigins []string, next http.Handler) http.Handler {

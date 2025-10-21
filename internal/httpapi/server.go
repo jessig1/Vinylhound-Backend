@@ -1,37 +1,74 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"vinylhound/internal/app/artists"
+	"vinylhound/internal/app/songs"
 	"vinylhound/internal/store"
 )
 
-// ContentStore exposes the persistence operations needed by the HTTP layer.
-type ContentStore interface {
-	CreateUser(username, password string, content []string) error
-	Authenticate(username, password string) (string, error)
-	ContentByToken(token string) ([]string, error)
-	UpdateContentByToken(token string, content []string) error
-	CreateAlbum(token string, album store.Album) (store.Album, error)
-	AlbumsByToken(token string) ([]store.Album, error)
-	ListAlbums(filter store.AlbumFilter) ([]store.Album, error)
-	AlbumByID(id int64) (store.Album, error)
-	UpsertAlbumPreference(token string, albumID int64, rating *int, favorited bool) error
-	AlbumPreferencesByToken(token string) ([]store.AlbumPreference, error)
+// UserService captures the user-facing operations needed by the HTTP handlers.
+type UserService interface {
+	Signup(ctx context.Context, username, password string, content []string) error
+	Authenticate(ctx context.Context, username, password string) (string, error)
+	Content(ctx context.Context, token string) ([]string, error)
+	UpdateContent(ctx context.Context, token string, content []string) error
 }
 
-// Server wires HTTP handlers to the backing store.
+// ArtistService describes artist catalogue workflows.
+type ArtistService interface {
+	List(ctx context.Context, filter artists.Filter) ([]artists.Artist, error)
+}
+
+// AlbumService exposes album-specific workflows.
+type AlbumService interface {
+	Create(ctx context.Context, token string, album store.Album) (store.Album, error)
+	ListByUser(ctx context.Context, token string) ([]store.Album, error)
+	List(ctx context.Context, filter store.AlbumFilter) ([]store.Album, error)
+	Get(ctx context.Context, id int64) (store.Album, error)
+}
+
+// SongService coordinates track-level operations.
+type SongService interface {
+	ListByAlbum(ctx context.Context, albumID int64) ([]songs.Song, error)
+}
+
+// RatingsService describes preference-related workflows.
+type RatingsService interface {
+	Upsert(ctx context.Context, token string, albumID int64, rating *int, favorited bool) error
+	ListByUser(ctx context.Context, token string) ([]store.AlbumPreference, error)
+}
+
+// Server wires HTTP handlers to the underlying services.
 type Server struct {
-	store ContentStore
+	users   UserService
+	artists ArtistService
+	albums  AlbumService
+	songs   SongService
+	ratings RatingsService
 }
 
 // New configures a Server with the given Store implementation.
-func New(store ContentStore) *Server {
-	return &Server{store: store}
+func New(
+	users UserService,
+	artists ArtistService,
+	albums AlbumService,
+	songs SongService,
+	ratings RatingsService,
+) *Server {
+	return &Server{
+		users:   users,
+		artists: artists,
+		albums:  albums,
+		songs:   songs,
+		ratings: ratings,
+	}
 }
 
 // Routes exposes the HTTP handlers for account and content management.
@@ -93,7 +130,7 @@ func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.CreateUser(req.Username, req.Password, req.Content); err != nil {
+	if err := s.users.Signup(r.Context(), req.Username, req.Password, req.Content); err != nil {
 		switch {
 		case errors.Is(err, store.ErrUserExists):
 			writeJSON(w, http.StatusConflict, errorResponse{Error: "username already taken"})
@@ -118,7 +155,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.store.Authenticate(req.Username, req.Password)
+	token, err := s.users.Authenticate(r.Context(), req.Username, req.Password)
 	if err != nil {
 		status := http.StatusUnauthorized
 		if !errors.Is(err, store.ErrInvalidCredentials) {
@@ -140,7 +177,7 @@ func (s *Server) handleContent(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		content, err := s.store.ContentByToken(token)
+		content, err := s.users.Content(r.Context(), token)
 		if err != nil {
 			status := http.StatusUnauthorized
 			if !errors.Is(err, store.ErrUnauthorized) {
@@ -160,7 +197,7 @@ func (s *Server) handleContent(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid JSON payload"})
 			return
 		}
-		if err := s.store.UpdateContentByToken(token, body.Content); err != nil {
+		if err := s.users.UpdateContent(r.Context(), token, body.Content); err != nil {
 			status := http.StatusUnauthorized
 			if !errors.Is(err, store.ErrUnauthorized) {
 				status = http.StatusInternalServerError
@@ -183,7 +220,7 @@ func (s *Server) handleAlbums(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		albums, err := s.store.AlbumsByToken(token)
+		albums, err := s.albums.ListByUser(r.Context(), token)
 		if err != nil {
 			status := http.StatusUnauthorized
 			if !errors.Is(err, store.ErrUnauthorized) {
@@ -211,7 +248,7 @@ func (s *Server) handleAlbums(w http.ResponseWriter, r *http.Request) {
 			Rating:      req.Rating,
 		}
 
-		created, err := s.store.CreateAlbum(token, album)
+		created, err := s.albums.Create(r.Context(), token, album)
 		if err != nil {
 			status := http.StatusInternalServerError
 			switch {
@@ -242,7 +279,7 @@ func (s *Server) handleAlbumPreferences(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	prefs, err := s.store.AlbumPreferencesByToken(token)
+	prefs, err := s.ratings.ListByUser(r.Context(), token)
 	if err != nil {
 		status := http.StatusUnauthorized
 		if !errors.Is(err, store.ErrUnauthorized) {
@@ -290,7 +327,7 @@ func (s *Server) handleAlbumPreference(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := s.store.UpsertAlbumPreference(token, albumID, req.Rating, req.Favorited); err != nil {
+		if err := s.ratings.Upsert(r.Context(), token, albumID, req.Rating, req.Favorited); err != nil {
 			status := http.StatusInternalServerError
 			switch {
 			case errors.Is(err, store.ErrUnauthorized):
@@ -305,7 +342,7 @@ func (s *Server) handleAlbumPreference(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case http.MethodDelete:
-		if err := s.store.UpsertAlbumPreference(token, albumID, nil, false); err != nil {
+		if err := s.ratings.Upsert(r.Context(), token, albumID, nil, false); err != nil {
 			status := http.StatusInternalServerError
 			switch {
 			case errors.Is(err, store.ErrUnauthorized):
@@ -353,7 +390,7 @@ func (s *Server) handleAlbumsList(w http.ResponseWriter, r *http.Request) {
 		filter.Rating = rating
 	}
 
-	albums, err := s.store.ListAlbums(filter)
+	albums, err := s.albums.List(r.Context(), filter)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
@@ -382,7 +419,7 @@ func (s *Server) handleAlbum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	album, err := s.store.AlbumByID(id)
+	album, err := s.albums.Get(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, store.ErrAlbumNotFound) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "album not found"})
