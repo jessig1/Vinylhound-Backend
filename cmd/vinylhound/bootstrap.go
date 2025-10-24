@@ -8,6 +8,8 @@ import (
 	"fmt"
 
 	"vinylhound/internal/store"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func bootstrapDemoData(ctx context.Context, db *sql.DB, dataStore *store.Store) error {
@@ -59,6 +61,10 @@ func ensureDemoAlbums(ctx context.Context, db *sql.DB) error {
 		FROM albums
 		WHERE user_id = $1
 	`, userID).Scan(&count); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42703" {
+			return nil
+		}
 		return fmt.Errorf("count demo albums: %w", err)
 	}
 	if count > 0 {

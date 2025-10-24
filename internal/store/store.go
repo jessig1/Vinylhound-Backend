@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
@@ -118,10 +119,12 @@ func (s *Store) Authenticate(username, password string) (string, error) {
 		return "", fmt.Errorf("create token: %w", err)
 	}
 
+	expiresAt := time.Now().Add(30 * 24 * time.Hour)
+
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO sessions (token, user_id)
-		VALUES ($1, $2)
-	`, token, userID); err != nil {
+		INSERT INTO sessions (token, user_id, expires_at)
+		VALUES ($1, $2, $3)
+	`, token, userID, expiresAt); err != nil {
 		return "", fmt.Errorf("store session: %w", err)
 	}
 

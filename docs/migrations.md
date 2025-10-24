@@ -12,7 +12,7 @@ go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 ## Applying migrations
 
 ```powershell
-set DATABASE_URL=postgres://user:pass@localhost:55432/vinylhound?sslmode=disable
+set DATABASE_URL=postgres://user:pass@localhost:54320/vinylhound?sslmode=disable
 migrate -path migrations -database %DATABASE_URL% up
 ```
 
