@@ -9,6 +9,13 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
+const ratingStatsQuery = `
+		SELECT album_id, AVG(rating)::double precision AS average_rating, COUNT(DISTINCT user_id) AS rating_count
+		FROM user_album_preferences
+		WHERE rating IS NOT NULL AND album_id IN ($1)
+		GROUP BY album_id
+	`
+
 func TestValidateAlbum(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -164,6 +171,11 @@ func TestListAlbumsWithFilters(t *testing.T) {
 			"id", "artist", "title", "release_year", "tracks", "genres", "rating",
 		}).AddRow(int64(1), "Boards of Canada", "Geogaddi", 2002, `["Music Is Math"]`, `["Electronic"]`, 5))
 
+	mock.ExpectQuery(regexp.QuoteMeta(ratingStatsQuery)).
+		WithArgs(int64(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"album_id", "average_rating", "rating_count"}).
+			AddRow(int64(1), 4.2, int64(18)))
+
 	albums, err := s.ListAlbums(AlbumFilter{
 		Artist: "Boards",
 		Rating: 5,
@@ -174,6 +186,9 @@ func TestListAlbumsWithFilters(t *testing.T) {
 
 	if len(albums) != 1 || albums[0].Title != "Geogaddi" {
 		t.Fatalf("unexpected albums: %#v", albums)
+	}
+	if albums[0].AverageRating != 4.2 || albums[0].RatingCount != 18 {
+		t.Fatalf("unexpected rating stats: %#v", albums[0])
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -384,6 +399,11 @@ func TestAlbumPreferencesByToken(t *testing.T) {
 			true,
 		))
 
+	mock.ExpectQuery(regexp.QuoteMeta(ratingStatsQuery)).
+		WithArgs(int64(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"album_id", "average_rating", "rating_count"}).
+			AddRow(int64(1), 4.6, int64(12)))
+
 	prefs, err := s.AlbumPreferencesByToken("token")
 	if err != nil {
 		t.Fatalf("AlbumPreferencesByToken: %v", err)
@@ -394,6 +414,9 @@ func TestAlbumPreferencesByToken(t *testing.T) {
 	}
 	if prefs[0].Album.ID != 1 || prefs[0].Rating == nil || *prefs[0].Rating != 5 || !prefs[0].Favorited {
 		t.Fatalf("unexpected preference: %#v", prefs[0])
+	}
+	if prefs[0].Album.AverageRating != 4.6 || prefs[0].Album.RatingCount != 12 {
+		t.Fatalf("unexpected album stats: %#v", prefs[0].Album)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

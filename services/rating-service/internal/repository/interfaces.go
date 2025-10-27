@@ -26,6 +26,6 @@ type ReviewRepository interface {
 
 // PreferenceRepository defines the interface for preference data operations
 type PreferenceRepository interface {
-	GetUserPreferences(ctx context.Context, userID int64) ([]*models.UserPreference, error)
-	UpdateUserPreferences(ctx context.Context, userID int64, preferences []*models.UserPreference) error
+	GetUserPreferences(ctx context.Context, userID int64) ([]*models.GenrePreference, error)
+	UpdateUserPreferences(ctx context.Context, userID int64, preferences []*models.GenrePreference) error
 }

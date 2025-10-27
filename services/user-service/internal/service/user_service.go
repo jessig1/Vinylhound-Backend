@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"vinylhound/shared/auth"
 	"vinylhound/shared/models"
@@ -17,9 +18,14 @@ type UserService struct {
 
 // NewUserService creates a new user service
 func NewUserService(repo repository.UserRepository) *UserService {
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		panic("JWT_SECRET environment variable is required")
+	}
+
 	return &UserService{
 		repo:     repo,
-		tokenMgr: auth.NewTokenManager("your-secret-key"), // TODO: Load from config
+		tokenMgr: auth.NewTokenManager(jwtSecret),
 	}
 }
 

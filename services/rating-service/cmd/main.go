@@ -79,6 +79,9 @@ func main() {
 	protectedPrefs.HandleFunc("", preferenceHandler.GetPreferences).Methods("GET")
 	protectedPrefs.HandleFunc("", preferenceHandler.UpdatePreferences).Methods("PUT")
 
+	// Album preferences
+	api.HandleFunc("/me/albums/{id}/preference", preferenceHandler.SetAlbumPreference).Methods("PUT")
+
 	// Health check
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

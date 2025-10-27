@@ -33,12 +33,12 @@ func (h *PreferenceHandler) GetPreferences(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string][]*models.UserPreference{"preferences": preferences})
+	json.NewEncoder(w).Encode(map[string][]*models.GenrePreference{"preferences": preferences})
 }
 
 // UpdatePreferencesRequest represents an update preferences request
 type UpdatePreferencesRequest struct {
-	Preferences []*models.UserPreference `json:"preferences"`
+	Preferences []*models.GenrePreference `json:"preferences"`
 }
 
 // UpdatePreferences handles updating user preferences
@@ -62,4 +62,11 @@ func (h *PreferenceHandler) UpdatePreferences(w http.ResponseWriter, r *http.Req
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Preferences updated successfully"})
+}
+
+// SetAlbumPreference handles setting an album preference for a user
+// TODO: This should be moved to a separate AlbumPreferenceHandler/Service/Repository
+// as it deals with album preferences (UserPreference model) not genre preferences (GenrePreference model)
+func (h *PreferenceHandler) SetAlbumPreference(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "Not implemented - album preferences should use a separate endpoint", http.StatusNotImplemented)
 }

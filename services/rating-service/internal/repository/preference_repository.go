@@ -19,8 +19,8 @@ func NewPreferenceRepository(db *sql.DB) PreferenceRepository {
 	return &preferenceRepository{db: db}
 }
 
-// GetUserPreferences retrieves user preferences
-func (r *preferenceRepository) GetUserPreferences(ctx context.Context, userID int64) ([]*models.UserPreference, error) {
+// GetUserPreferences retrieves user genre preferences
+func (r *preferenceRepository) GetUserPreferences(ctx context.Context, userID int64) ([]*models.GenrePreference, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, user_id, genre, weight, created_at, updated_at
 		FROM user_preferences
@@ -32,9 +32,9 @@ func (r *preferenceRepository) GetUserPreferences(ctx context.Context, userID in
 	}
 	defer rows.Close()
 
-	var preferences []*models.UserPreference
+	var preferences []*models.GenrePreference
 	for rows.Next() {
-		pref := &models.UserPreference{}
+		pref := &models.GenrePreference{}
 		err := rows.Scan(&pref.ID, &pref.UserID, &pref.Genre, &pref.Weight, &pref.CreatedAt, &pref.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan preference: %w", err)
@@ -49,8 +49,8 @@ func (r *preferenceRepository) GetUserPreferences(ctx context.Context, userID in
 	return preferences, nil
 }
 
-// UpdateUserPreferences updates user preferences
-func (r *preferenceRepository) UpdateUserPreferences(ctx context.Context, userID int64, preferences []*models.UserPreference) error {
+// UpdateUserPreferences updates user genre preferences
+func (r *preferenceRepository) UpdateUserPreferences(ctx context.Context, userID int64, preferences []*models.GenrePreference) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)

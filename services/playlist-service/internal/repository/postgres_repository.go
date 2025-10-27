@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lib/pq"
 	"vinylhound/shared/models"
 )
 
@@ -23,7 +24,7 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 // List returns all playlists ordered by creation time (newest first).
 func (r *PostgresRepository) List(ctx context.Context) ([]*models.Playlist, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, title, owner, created_at, updated_at
+		SELECT id, title, owner, created_at, updated_at, tags, is_public
 		FROM playlists
 		ORDER BY created_at DESC, id DESC`)
 	if err != nil {
@@ -34,7 +35,7 @@ func (r *PostgresRepository) List(ctx context.Context) ([]*models.Playlist, erro
 	var playlists []*models.Playlist
 	for rows.Next() {
 		var playlist models.Playlist
-		if err := rows.Scan(&playlist.ID, &playlist.Title, &playlist.Owner, &playlist.CreatedAt, &playlist.UpdatedAt); err != nil {
+		if err := rows.Scan(&playlist.ID, &playlist.Title, &playlist.Owner, &playlist.CreatedAt, &playlist.UpdatedAt, pq.Array(&playlist.Tags), &playlist.IsPublic); err != nil {
 			return nil, fmt.Errorf("scan playlist: %w", err)
 		}
 		songs, err := r.listSongs(ctx, playlist.ID)
@@ -55,9 +56,9 @@ func (r *PostgresRepository) List(ctx context.Context) ([]*models.Playlist, erro
 func (r *PostgresRepository) Get(ctx context.Context, id int64) (*models.Playlist, error) {
 	var playlist models.Playlist
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, title, owner, created_at, updated_at
+		SELECT id, title, owner, created_at, updated_at, tags, is_public
 		FROM playlists
-		WHERE id = $1`, id).Scan(&playlist.ID, &playlist.Title, &playlist.Owner, &playlist.CreatedAt, &playlist.UpdatedAt)
+		WHERE id = $1`, id).Scan(&playlist.ID, &playlist.Title, &playlist.Owner, &playlist.CreatedAt, &playlist.UpdatedAt, pq.Array(&playlist.Tags), &playlist.IsPublic)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrPlaylistNotFound
 	}
@@ -91,10 +92,10 @@ func (r *PostgresRepository) Create(ctx context.Context, playlist *models.Playli
 
 	now := time.Now().UTC()
 	if err = tx.QueryRowContext(ctx, `
-		INSERT INTO playlists (title, owner, created_at, updated_at)
-		VALUES ($1, $2, $3, $3)
+		INSERT INTO playlists (title, owner, created_at, updated_at, tags, is_public)
+		VALUES ($1, $2, $3, $3, $4, $5)
 		RETURNING id, created_at, updated_at`,
-		playlist.Title, playlist.Owner, now,
+		playlist.Title, playlist.Owner, now, pq.Array(playlist.Tags), playlist.IsPublic,
 	).Scan(&playlist.ID, &playlist.CreatedAt, &playlist.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("insert playlist: %w", err)
 	}
@@ -129,9 +130,9 @@ func (r *PostgresRepository) Update(ctx context.Context, id int64, playlist *mod
 
 	res, err := tx.ExecContext(ctx, `
 		UPDATE playlists
-		SET title = $1, owner = $2, updated_at = $3
-		WHERE id = $4`,
-		playlist.Title, playlist.Owner, time.Now().UTC(), id)
+		SET title = $1, owner = $2, updated_at = $3, tags = $4, is_public = $5
+		WHERE id = $6`,
+		playlist.Title, playlist.Owner, time.Now().UTC(), pq.Array(playlist.Tags), playlist.IsPublic, id)
 	if err != nil {
 		return nil, fmt.Errorf("update playlist: %w", err)
 	}
@@ -149,9 +150,9 @@ func (r *PostgresRepository) Update(ctx context.Context, id int64, playlist *mod
 
 	var updated models.Playlist
 	if err = tx.QueryRowContext(ctx, `
-		SELECT id, title, owner, created_at, updated_at
+		SELECT id, title, owner, created_at, updated_at, tags, is_public
 		FROM playlists
-		WHERE id = $1`, id).Scan(&updated.ID, &updated.Title, &updated.Owner, &updated.CreatedAt, &updated.UpdatedAt); err != nil {
+		WHERE id = $1`, id).Scan(&updated.ID, &updated.Title, &updated.Owner, &updated.CreatedAt, &updated.UpdatedAt, &updated.Tags, &updated.IsPublic); err != nil {
 		return nil, fmt.Errorf("reload playlist: %w", err)
 	}
 

@@ -18,13 +18,15 @@ var (
 
 // Album models a music record owned by a specific user.
 type Album struct {
-	ID          int64    `json:"id"`
-	Artist      string   `json:"artist"`
-	Title       string   `json:"title"`
-	ReleaseYear int      `json:"releaseYear"`
-	Tracks      []string `json:"trackList"`
-	Genres      []string `json:"genreList"`
-	Rating      int      `json:"rating"`
+	ID            int64    `json:"id"`
+	Artist        string   `json:"artist"`
+	Title         string   `json:"title"`
+	ReleaseYear   int      `json:"releaseYear"`
+	Tracks        []string `json:"trackList"`
+	Genres        []string `json:"genreList"`
+	Rating        int      `json:"rating"`
+	AverageRating float64  `json:"averageRating,omitempty"`
+	RatingCount   int      `json:"ratingCount,omitempty"`
 }
 
 // AlbumPreference captures a user's personal rating and favorite flag for an album.
@@ -94,6 +96,11 @@ func (s *Store) AlbumsByToken(token string) ([]Album, error) {
 	defer rows.Close()
 
 	albums, err := scanAlbumRows(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	albums, err = s.applyAlbumRatingStats(ctx, albums)
 	if err != nil {
 		return nil, err
 	}
@@ -170,6 +177,11 @@ func (s *Store) ListAlbums(filter AlbumFilter) ([]Album, error) {
 		return nil, err
 	}
 
+	albums, err = s.applyAlbumRatingStats(ctx, albums)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate albums: %w", err)
 	}
@@ -194,7 +206,12 @@ func (s *Store) AlbumByID(id int64) (Album, error) {
 		}
 		return Album{}, err
 	}
-	return album, nil
+
+	albums, err := s.applyAlbumRatingStats(ctx, []Album{album})
+	if err != nil {
+		return Album{}, err
+	}
+	return albums[0], nil
 }
 
 // UpsertAlbumPreference sets or updates the calling user's rating/favorite for an album.
@@ -319,6 +336,21 @@ func (s *Store) AlbumPreferencesByToken(token string) ([]AlbumPreference, error)
 		return nil, fmt.Errorf("iterate album preferences: %w", err)
 	}
 
+	albums := make([]Album, len(preferences))
+	for i := range preferences {
+		albums[i] = preferences[i].Album
+	}
+
+	albums, err = s.applyAlbumRatingStats(ctx, albums)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range preferences {
+		preferences[i].Album.AverageRating = albums[i].AverageRating
+		preferences[i].Album.RatingCount = albums[i].RatingCount
+	}
+
 	return preferences, nil
 }
 
@@ -345,6 +377,105 @@ func validateAlbumRating(rating int) error {
 		return fmt.Errorf("%w: rating must be between 1 and 5", ErrInvalidAlbum)
 	}
 	return nil
+}
+
+func buildPlaceholders(count int, start int) []string {
+	if count <= 0 {
+		return nil
+	}
+	placeholders := make([]string, count)
+	for i := 0; i < count; i++ {
+		placeholders[i] = fmt.Sprintf("$%d", start+i)
+	}
+	return placeholders
+}
+
+func (s *Store) fetchAlbumRatingStats(ctx context.Context, albumIDs []int64) (map[int64]albumRatingStat, error) {
+	if len(albumIDs) == 0 {
+		return map[int64]albumRatingStat{}, nil
+	}
+
+	uniqueIDs := make([]int64, 0, len(albumIDs))
+	seen := make(map[int64]struct{}, len(albumIDs))
+	for _, id := range albumIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniqueIDs = append(uniqueIDs, id)
+	}
+
+	placeholders := buildPlaceholders(len(uniqueIDs), 1)
+	args := make([]any, len(uniqueIDs))
+	for i, id := range uniqueIDs {
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT album_id, AVG(rating)::double precision AS average_rating, COUNT(DISTINCT user_id) AS rating_count
+		FROM user_album_preferences
+		WHERE rating IS NOT NULL AND album_id IN (%s)
+		GROUP BY album_id
+	`, strings.Join(placeholders, ", "))
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("aggregate album ratings: %w", err)
+	}
+	defer rows.Close()
+
+	stats := make(map[int64]albumRatingStat, len(uniqueIDs))
+	for rows.Next() {
+		var (
+			albumID int64
+			average sql.NullFloat64
+			count   int64
+		)
+		if err := rows.Scan(&albumID, &average, &count); err != nil {
+			return nil, fmt.Errorf("scan album rating stats: %w", err)
+		}
+		stat := albumRatingStat{
+			count: int(count),
+		}
+		if average.Valid {
+			stat.average = average.Float64
+		}
+		stats[albumID] = stat
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate album rating stats: %w", err)
+	}
+	return stats, nil
+}
+
+func (s *Store) applyAlbumRatingStats(ctx context.Context, albums []Album) ([]Album, error) {
+	if len(albums) == 0 {
+		return albums, nil
+	}
+
+	ids := make([]int64, len(albums))
+	for i, album := range albums {
+		ids[i] = album.ID
+		albums[i].AverageRating = 0
+		albums[i].RatingCount = 0
+	}
+
+	stats, err := s.fetchAlbumRatingStats(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range albums {
+		if stat, ok := stats[albums[i].ID]; ok {
+			albums[i].AverageRating = stat.average
+			albums[i].RatingCount = stat.count
+		}
+	}
+	return albums, nil
+}
+
+type albumRatingStat struct {
+	average float64
+	count   int
 }
 
 type albumScanner interface {

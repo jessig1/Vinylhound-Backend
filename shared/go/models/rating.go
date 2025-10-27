@@ -25,8 +25,8 @@ type Review struct {
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
 
-// UserPreference represents user preferences for recommendations
-type UserPreference struct {
+// GenrePreference represents user preferences for music genres
+type GenrePreference struct {
 	ID        int64     `json:"id" db:"id"`
 	UserID    int64     `json:"user_id" db:"user_id"`
 	Genre     string    `json:"genre" db:"genre"`

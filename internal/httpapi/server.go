@@ -74,6 +74,18 @@ func New(
 // Routes exposes the HTTP handlers for account and content management.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+
+	// API v1 routes (standardized)
+	mux.HandleFunc("/api/v1/auth/signup", s.handleSignup)
+	mux.HandleFunc("/api/v1/auth/login", s.handleLogin)
+	mux.HandleFunc("/api/v1/users/profile", s.handleContent) // me/content -> users/profile
+	mux.HandleFunc("/api/v1/me/albums", s.handleAlbums)
+	mux.HandleFunc("/api/v1/me/albums/preferences", s.handleAlbumPreferences)
+	mux.HandleFunc("/api/v1/me/albums/", s.handleAlbumPreference)
+	mux.HandleFunc("/api/v1/albums", s.handleAlbumsList)
+	mux.HandleFunc("/api/v1/albums/", s.handleAlbum) // Changed from /api/album
+
+	// Legacy routes (for backward compatibility) - TODO: Remove after frontend migration
 	mux.HandleFunc("/api/signup", s.handleSignup)
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/me/content", s.handleContent)
@@ -82,6 +94,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/me/albums/", s.handleAlbumPreference)
 	mux.HandleFunc("/api/albums", s.handleAlbumsList)
 	mux.HandleFunc("/api/album", s.handleAlbum)
+
 	return mux
 }
 
