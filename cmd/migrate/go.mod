@@ -1,9 +1,9 @@
 module vinylhound/cmd/migrate
 
-go 1.21
+go 1.23.0
 
 require (
-	github.com/golang-migrate/migrate/v4 v4.16.2
+	github.com/golang-migrate/migrate/v4 v4.19.0
 	github.com/lib/pq v1.10.9
 )
 

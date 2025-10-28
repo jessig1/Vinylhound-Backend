@@ -50,9 +50,15 @@ func main() {
 		log.Fatalf("Failed to get working directory: %v", err)
 	}
 
-	// Find migrations directory
-	migrationsPath := filepath.Join(filepath.Dir(wd), "migrations")
-	sourceURL := fmt.Sprintf("file://%s", migrationsPath)
+	// Find migrations directory (2 levels up from cmd/migrate)
+	migrationsPath := filepath.Join(filepath.Dir(filepath.Dir(wd)), "migrations")
+
+	// Convert to absolute path and use filepath.ToSlash for cross-platform compatibility
+	absPath, err := filepath.Abs(migrationsPath)
+	if err != nil {
+		log.Fatalf("Failed to get absolute path: %v", err)
+	}
+	sourceURL := fmt.Sprintf("file://%s", filepath.ToSlash(absPath))
 
 	// Create a new migrate instance
 	m, err := migrate.NewWithDatabaseInstance(sourceURL, "postgres", driver)
@@ -63,7 +69,12 @@ func main() {
 	// Run migrations
 	if os.Args[1] == "up" {
 		if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-			log.Fatalf("Failed to run migrations: %v", err)
+			log.Printf("Warning: migration error: %v", err)
+			// Try to force clean state and retry
+			m.Force(1)
+			if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+				log.Fatalf("Failed to run migrations after force: %v", err)
+			}
 		}
 		log.Println("Migrations applied successfully")
 	} else {

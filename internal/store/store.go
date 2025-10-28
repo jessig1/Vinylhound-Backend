@@ -209,6 +209,11 @@ func (s *Store) UpdateContentByToken(token string, content []string) error {
 	return nil
 }
 
+// UserIDByToken returns the user ID associated with a valid session token.
+func (s *Store) UserIDByToken(ctx context.Context, token string) (int64, error) {
+	return s.userIDForToken(ctx, token)
+}
+
 func (s *Store) userIDForToken(ctx context.Context, token string) (int64, error) {
 	var userID int64
 	err := s.db.QueryRowContext(ctx, `

@@ -19,18 +19,30 @@ type AlbumProvider interface {
 	Get(ctx context.Context, id int64) (store.Album, error)
 }
 
+// SongStore exposes song database operations.
+type SongStore interface {
+	ListSongs(ctx context.Context, filter store.SongFilter) ([]store.Song, error)
+	GetSong(ctx context.Context, id int64) (store.Song, error)
+}
+
 // Service exposes song-centric operations.
 type Service interface {
 	ListByAlbum(ctx context.Context, albumID int64) ([]Song, error)
+	Search(ctx context.Context, filter store.SongFilter) ([]store.Song, error)
+	Get(ctx context.Context, id int64) (store.Song, error)
 }
 
 type service struct {
 	albums AlbumProvider
+	store  SongStore
 }
 
-// New constructs a song Service backed by the provided album provider.
-func New(albums AlbumProvider) Service {
-	return &service{albums: albums}
+// New constructs a song Service backed by the provided providers.
+func New(albums AlbumProvider, songStore SongStore) Service {
+	return &service{
+		albums: albums,
+		store:  songStore,
+	}
 }
 
 func (s *service) ListByAlbum(ctx context.Context, albumID int64) ([]Song, error) {
@@ -56,4 +68,18 @@ func (s *service) ListByAlbum(ctx context.Context, albumID int64) ([]Song, error
 		})
 	}
 	return tracks, nil
+}
+
+func (s *service) Search(ctx context.Context, filter store.SongFilter) ([]store.Song, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.store.ListSongs(ctx, filter)
+}
+
+func (s *service) Get(ctx context.Context, id int64) (store.Song, error) {
+	if err := ctx.Err(); err != nil {
+		return store.Song{}, err
+	}
+	return s.store.GetSong(ctx, id)
 }

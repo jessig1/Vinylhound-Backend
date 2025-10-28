@@ -11,6 +11,7 @@ import (
 	"vinylhound/internal/app/artists"
 	"vinylhound/internal/app/songs"
 	"vinylhound/internal/store"
+	"vinylhound/shared/go/models"
 )
 
 // UserService captures the user-facing operations needed by the HTTP handlers.
@@ -37,6 +38,8 @@ type AlbumService interface {
 // SongService coordinates track-level operations.
 type SongService interface {
 	ListByAlbum(ctx context.Context, albumID int64) ([]songs.Song, error)
+	Search(ctx context.Context, filter store.SongFilter) ([]store.Song, error)
+	Get(ctx context.Context, id int64) (store.Song, error)
 }
 
 // RatingsService describes preference-related workflows.
@@ -45,13 +48,25 @@ type RatingsService interface {
 	ListByUser(ctx context.Context, token string) ([]store.AlbumPreference, error)
 }
 
+// PlaylistService coordinates playlist-related operations.
+type PlaylistService interface {
+	List(ctx context.Context, token string) ([]*models.Playlist, error)
+	Get(ctx context.Context, id int64) (*models.Playlist, error)
+	Create(ctx context.Context, token string, playlist *models.Playlist) (*models.Playlist, error)
+	Update(ctx context.Context, token string, id int64, playlist *models.Playlist) (*models.Playlist, error)
+	Delete(ctx context.Context, token string, id int64) error
+	AddSong(ctx context.Context, token string, playlistID int64, songID int64) error
+	RemoveSong(ctx context.Context, token string, playlistID int64, songID int64) error
+}
+
 // Server wires HTTP handlers to the underlying services.
 type Server struct {
-	users   UserService
-	artists ArtistService
-	albums  AlbumService
-	songs   SongService
-	ratings RatingsService
+	users     UserService
+	artists   ArtistService
+	albums    AlbumService
+	songs     SongService
+	ratings   RatingsService
+	playlists PlaylistService
 }
 
 // New configures a Server with the given Store implementation.
@@ -61,19 +76,27 @@ func New(
 	albums AlbumService,
 	songs SongService,
 	ratings RatingsService,
+	playlists PlaylistService,
 ) *Server {
 	return &Server{
-		users:   users,
-		artists: artists,
-		albums:  albums,
-		songs:   songs,
-		ratings: ratings,
+		users:     users,
+		artists:   artists,
+		albums:    albums,
+		songs:     songs,
+		ratings:   ratings,
+		playlists: playlists,
 	}
 }
 
 // Routes exposes the HTTP handlers for account and content management.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+
+	// Health check endpoint
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
 
 	// API v1 routes (standardized)
 	mux.HandleFunc("/api/v1/auth/signup", s.handleSignup)
@@ -84,6 +107,14 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/v1/me/albums/", s.handleAlbumPreference)
 	mux.HandleFunc("/api/v1/albums", s.handleAlbumsList)
 	mux.HandleFunc("/api/v1/albums/", s.handleAlbum) // Changed from /api/album
+
+	// Playlist routes
+	mux.HandleFunc("/api/v1/playlists", s.handlePlaylists)
+	mux.HandleFunc("/api/v1/playlists/", s.handlePlaylist)
+
+	// Song routes
+	mux.HandleFunc("/api/v1/songs", s.handleSongs)
+	mux.HandleFunc("/api/v1/songs/", s.handleSong)
 
 	// Legacy routes (for backward compatibility) - TODO: Remove after frontend migration
 	mux.HandleFunc("/api/signup", s.handleSignup)
@@ -420,11 +451,31 @@ func (s *Server) handleAlbum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	idStr := r.URL.Query().Get("id")
-	if idStr == "" {
+	// Extract ID from URL path: /api/v1/albums/{id}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/albums/")
+
+	// If TrimPrefix didn't change the path, try legacy /api/album?id=X format
+	if path == r.URL.Path {
+		path = strings.TrimPrefix(r.URL.Path, "/api/album")
+		if path == "" || path == r.URL.Path {
+			// Not a valid path, try query parameter
+			idStr := r.URL.Query().Get("id")
+			if idStr == "" {
+				writeJSON(w, http.StatusBadRequest, errorResponse{Error: "missing id parameter"})
+				return
+			}
+			path = idStr
+		}
+	}
+
+	// Parse the ID from the path
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "missing id parameter"})
 		return
 	}
+
+	idStr := parts[0]
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
