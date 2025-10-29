@@ -484,13 +484,19 @@ type albumScanner interface {
 
 func scanAlbumRow(scanner albumScanner) (Album, error) {
 	var (
-		a          Album
-		tracksJSON []byte
-		genresJSON []byte
+		a           Album
+		tracksJSON  []byte
+		genresJSON  []byte
+		releaseYear sql.NullInt64
 	)
 
-	if err := scanner.Scan(&a.ID, &a.Artist, &a.Title, &a.ReleaseYear, &tracksJSON, &genresJSON, &a.Rating); err != nil {
+	if err := scanner.Scan(&a.ID, &a.Artist, &a.Title, &releaseYear, &tracksJSON, &genresJSON, &a.Rating); err != nil {
 		return Album{}, fmt.Errorf("scan album: %w", err)
+	}
+
+	// Convert nullable release year to int (0 if NULL)
+	if releaseYear.Valid {
+		a.ReleaseYear = int(releaseYear.Int64)
 	}
 
 	if err := json.Unmarshal(tracksJSON, &a.Tracks); err != nil {

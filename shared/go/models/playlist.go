@@ -24,5 +24,6 @@ type Playlist struct {
 	SongCount   int            `json:"song_count" db:"song_count"`
 	Tags        []string       `json:"tags" db:"tags"`
 	IsPublic    bool           `json:"is_public" db:"is_public"`
+	IsFavorite  bool           `json:"is_favorite" db:"is_favorite"`
 	Songs       []PlaylistSong `json:"songs"`
 }

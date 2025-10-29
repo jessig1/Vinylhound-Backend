@@ -11,7 +11,12 @@ import (
 	"vinylhound/shared/go/models"
 )
 
-var ErrPlaylistNotFound = errors.New("playlist not found")
+var (
+	ErrPlaylistNotFound           = errors.New("playlist not found")
+	ErrCannotDeleteFavorites      = errors.New("cannot delete favorites playlist")
+	ErrCannotRenameFavorites      = errors.New("cannot rename favorites playlist")
+	ErrCannotModifyFavoritesFlag  = errors.New("cannot modify is_favorite flag")
+)
 
 // ListPlaylists returns all playlists for a user (by token).
 func (s *Store) ListPlaylists(ctx context.Context, token string) ([]*models.Playlist, error) {
@@ -21,10 +26,10 @@ func (s *Store) ListPlaylists(ctx context.Context, token string) ([]*models.Play
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, title, description, owner, user_id, created_at, updated_at, tags, is_public
+		SELECT id, title, description, owner, user_id, created_at, updated_at, tags, is_public, is_favorite
 		FROM playlists
 		WHERE user_id = $1
-		ORDER BY created_at DESC, id DESC`, userID)
+		ORDER BY is_favorite DESC, created_at DESC, id DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list playlists: %w", err)
 	}
@@ -35,7 +40,7 @@ func (s *Store) ListPlaylists(ctx context.Context, token string) ([]*models.Play
 		var playlist models.Playlist
 		var description sql.NullString
 		if err := rows.Scan(&playlist.ID, &playlist.Title, &description, &playlist.Owner, &playlist.UserID,
-			&playlist.CreatedAt, &playlist.UpdatedAt, pq.Array(&playlist.Tags), &playlist.IsPublic); err != nil {
+			&playlist.CreatedAt, &playlist.UpdatedAt, pq.Array(&playlist.Tags), &playlist.IsPublic, &playlist.IsFavorite); err != nil {
 			return nil, fmt.Errorf("scan playlist: %w", err)
 		}
 		playlist.Description = description.String
@@ -59,10 +64,10 @@ func (s *Store) GetPlaylist(ctx context.Context, id int64) (*models.Playlist, er
 	var playlist models.Playlist
 	var description sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, title, description, owner, user_id, created_at, updated_at, tags, is_public
+		SELECT id, title, description, owner, user_id, created_at, updated_at, tags, is_public, is_favorite
 		FROM playlists
 		WHERE id = $1`, id).Scan(&playlist.ID, &playlist.Title, &description, &playlist.Owner, &playlist.UserID,
-		&playlist.CreatedAt, &playlist.UpdatedAt, pq.Array(&playlist.Tags), &playlist.IsPublic)
+		&playlist.CreatedAt, &playlist.UpdatedAt, pq.Array(&playlist.Tags), &playlist.IsPublic, &playlist.IsFavorite)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrPlaylistNotFound
 	}
@@ -149,6 +154,22 @@ func (s *Store) UpdatePlaylist(ctx context.Context, token string, id int64, play
 		return nil, err
 	}
 
+	// Check if this is a favorites playlist
+	var isFavorite bool
+	var currentTitle string
+	err = s.db.QueryRowContext(ctx, `SELECT is_favorite, title FROM playlists WHERE id = $1 AND user_id = $2`, id, userID).Scan(&isFavorite, &currentTitle)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrPlaylistNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("check playlist: %w", err)
+	}
+
+	// Prevent renaming favorites playlist
+	if isFavorite && playlist.Title != "Favorites" && playlist.Title != currentTitle {
+		return nil, ErrCannotRenameFavorites
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -164,7 +185,7 @@ func (s *Store) UpdatePlaylist(ctx context.Context, token string, id int64, play
 		description = sql.NullString{String: playlist.Description, Valid: true}
 	}
 
-	// Don't update owner field - it should never change after creation
+	// Don't update owner field or is_favorite - they should never change after creation
 	res, err := tx.ExecContext(ctx, `
 		UPDATE playlists
 		SET title = $1, description = $2, updated_at = $3, tags = $4, is_public = $5
@@ -192,10 +213,10 @@ func (s *Store) UpdatePlaylist(ctx context.Context, token string, id int64, play
 	var updated models.Playlist
 	var desc sql.NullString
 	if err = tx.QueryRowContext(ctx, `
-		SELECT id, title, description, owner, user_id, created_at, updated_at, tags, is_public
+		SELECT id, title, description, owner, user_id, created_at, updated_at, tags, is_public, is_favorite
 		FROM playlists
 		WHERE id = $1`, id).Scan(&updated.ID, &updated.Title, &desc, &updated.Owner, &updated.UserID,
-		&updated.CreatedAt, &updated.UpdatedAt, pq.Array(&updated.Tags), &updated.IsPublic); err != nil {
+		&updated.CreatedAt, &updated.UpdatedAt, pq.Array(&updated.Tags), &updated.IsPublic, &updated.IsFavorite); err != nil {
 		return nil, fmt.Errorf("reload playlist: %w", err)
 	}
 	updated.Description = desc.String
@@ -219,6 +240,21 @@ func (s *Store) DeletePlaylist(ctx context.Context, token string, id int64) erro
 	userID, err := s.UserIDByToken(ctx, token)
 	if err != nil {
 		return err
+	}
+
+	// Check if this is a favorites playlist
+	var isFavorite bool
+	err = s.db.QueryRowContext(ctx, `SELECT is_favorite FROM playlists WHERE id = $1 AND user_id = $2`, id, userID).Scan(&isFavorite)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrPlaylistNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("check playlist: %w", err)
+	}
+
+	// Prevent deletion of favorites playlist
+	if isFavorite {
+		return ErrCannotDeleteFavorites
 	}
 
 	res, err := s.db.ExecContext(ctx, `DELETE FROM playlists WHERE id = $1 AND user_id = $2`, id, userID)

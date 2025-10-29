@@ -19,10 +19,16 @@ func NewUserRepository(db *sql.DB) UserRepository {
 	return &userRepository{db: db}
 }
 
-// CreateUser creates a new user
+// CreateUser creates a new user and their default favorites playlist
 func (r *userRepository) CreateUser(ctx context.Context, username, passwordHash string) (int64, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
 	var userID int64
-	err := r.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		INSERT INTO users (username, password_hash, created_at, updated_at)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id
@@ -30,6 +36,20 @@ func (r *userRepository) CreateUser(ctx context.Context, username, passwordHash 
 
 	if err != nil {
 		return 0, fmt.Errorf("insert user: %w", err)
+	}
+
+	// Create the default favorites playlist
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO playlists (title, description, owner, user_id, is_favorite, is_public, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, TRUE, FALSE, $5, $6)
+	`, "Favorites", "Your favorited songs and albums", username, userID, time.Now(), time.Now())
+
+	if err != nil {
+		return 0, fmt.Errorf("create favorites playlist: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit transaction: %w", err)
 	}
 
 	return userID, nil

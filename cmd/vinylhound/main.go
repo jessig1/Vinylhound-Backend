@@ -26,7 +26,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	handler := newHTTPHandler(cfg, dataStore)
+	handler := newHTTPHandler(cfg, db, dataStore)
 
 	log.Printf("API available at http://localhost%v", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, handler); err != nil {

@@ -11,9 +11,11 @@ import (
 
 // Config contains application-wide settings sourced from the environment.
 type Config struct {
-	DatabaseURL    string
-	Addr           string
-	AllowedOrigins []string
+	DatabaseURL         string
+	Addr                string
+	AllowedOrigins      []string
+	SpotifyClientID     string
+	SpotifyClientSecret string
 }
 
 func loadConfig() (Config, error) {
@@ -29,9 +31,11 @@ func loadConfig() (Config, error) {
 	origins := parseAllowedOrigins(envOrDefault("CORS_ALLOWED_ORIGINS", "http://localhost:5173"))
 
 	return Config{
-		DatabaseURL:    dsn,
-		Addr:           addr,
-		AllowedOrigins: origins,
+		DatabaseURL:         dsn,
+		Addr:                addr,
+		AllowedOrigins:      origins,
+		SpotifyClientID:     os.Getenv("SPOTIFY_CLIENT_ID"),
+		SpotifyClientSecret: os.Getenv("SPOTIFY_CLIENT_SECRET"),
 	}, nil
 }
 

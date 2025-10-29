@@ -10,6 +10,8 @@ import (
 
 	"vinylhound/internal/app/artists"
 	"vinylhound/internal/app/songs"
+	"vinylhound/internal/musicapi"
+	"vinylhound/internal/searchservice"
 	"vinylhound/internal/store"
 	"vinylhound/shared/go/models"
 )
@@ -59,14 +61,23 @@ type PlaylistService interface {
 	RemoveSong(ctx context.Context, token string, playlistID int64, songID int64) error
 }
 
+// SearchService provides unified search across music providers.
+type SearchService interface {
+	Search(ctx context.Context, opts searchservice.SearchOptions) (*searchservice.SearchResults, error)
+	ImportAlbum(ctx context.Context, albumID string, provider musicapi.MusicProvider) error
+	GetArtistWithAlbums(ctx context.Context, artistID string) (*musicapi.Artist, []musicapi.Album, error)
+	GetAlbumWithTracks(ctx context.Context, albumID string) (*musicapi.Album, []musicapi.Track, error)
+}
+
 // Server wires HTTP handlers to the underlying services.
 type Server struct {
-	users     UserService
-	artists   ArtistService
-	albums    AlbumService
-	songs     SongService
-	ratings   RatingsService
-	playlists PlaylistService
+	users         UserService
+	artists       ArtistService
+	albums        AlbumService
+	songs         SongService
+	ratings       RatingsService
+	playlists     PlaylistService
+	searchService SearchService
 }
 
 // New configures a Server with the given Store implementation.
@@ -77,14 +88,16 @@ func New(
 	songs SongService,
 	ratings RatingsService,
 	playlists PlaylistService,
+	searchService SearchService,
 ) *Server {
 	return &Server{
-		users:     users,
-		artists:   artists,
-		albums:    albums,
-		songs:     songs,
-		ratings:   ratings,
-		playlists: playlists,
+		users:         users,
+		artists:       artists,
+		albums:        albums,
+		songs:         songs,
+		ratings:       ratings,
+		playlists:     playlists,
+		searchService: searchService,
 	}
 }
 
@@ -115,6 +128,18 @@ func (s *Server) Routes() http.Handler {
 	// Song routes
 	mux.HandleFunc("/api/v1/songs", s.handleSongs)
 	mux.HandleFunc("/api/v1/songs/", s.handleSong)
+
+	// Favorites routes
+	mux.HandleFunc("/api/v1/favorites", s.handleFavorites)
+	mux.HandleFunc("/api/v1/favorites/check", s.handleCheckFavorite)
+	mux.HandleFunc("/api/v1/favorites/playlist", s.handleFavoritesPlaylist)
+
+	// Search routes
+	mux.HandleFunc("/api/v1/search", s.handleSearch)
+	mux.HandleFunc("/api/v1/import/album", s.handleImportAlbum)
+	mux.HandleFunc("/api/v1/providers", s.handleProviders)
+	mux.HandleFunc("/api/v1/artist", s.handleGetArtist)
+	mux.HandleFunc("/api/v1/album/details", s.handleGetAlbumDetails)
 
 	// Legacy routes (for backward compatibility) - TODO: Remove after frontend migration
 	mux.HandleFunc("/api/signup", s.handleSignup)
@@ -345,8 +370,14 @@ func (s *Server) handleAlbumPreference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	trimmed := strings.TrimPrefix(r.URL.Path, "/api/me/albums/")
-	if trimmed == "" {
+	// Handle both /api/v1/me/albums/ and /api/me/albums/ paths
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/me/albums/")
+	if trimmed == r.URL.Path {
+		// Path didn't match v1, try legacy path
+		trimmed = strings.TrimPrefix(r.URL.Path, "/api/me/albums/")
+	}
+
+	if trimmed == "" || trimmed == r.URL.Path {
 		http.NotFound(w, r)
 		return
 	}

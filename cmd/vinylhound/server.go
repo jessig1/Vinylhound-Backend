@@ -1,6 +1,8 @@
 package main
 
 import (
+	"database/sql"
+	"log"
 	"net/http"
 	"strings"
 
@@ -11,18 +13,35 @@ import (
 	"vinylhound/internal/app/songs"
 	"vinylhound/internal/app/users"
 	"vinylhound/internal/httpapi"
+	"vinylhound/internal/musicapi"
+	"vinylhound/internal/searchservice"
 	"vinylhound/internal/store"
 )
 
-func newHTTPHandler(cfg Config, dataStore *store.Store) http.Handler {
+func newHTTPHandler(cfg Config, db *sql.DB, dataStore *store.Store) http.Handler {
 	userSvc := users.New(dataStore)
 	albumSvc := albums.New(dataStore)
 	ratingsSvc := ratings.New(dataStore)
 	artistSvc := artists.New(albumSvc)
 	songSvc := songs.New(albumSvc, dataStore)
 	playlistSvc := playlists.New(dataStore)
+	searchSvc := newSearchService(cfg, db, dataStore)
 
-	return withCORS(cfg.AllowedOrigins, httpapi.New(userSvc, artistSvc, albumSvc, songSvc, ratingsSvc, playlistSvc).Routes())
+	return withCORS(cfg.AllowedOrigins, httpapi.New(userSvc, artistSvc, albumSvc, songSvc, ratingsSvc, playlistSvc, searchSvc).Routes())
+}
+
+func newSearchService(cfg Config, db *sql.DB, dataStore *store.Store) *searchservice.Service {
+	var spotifyClient musicapi.MusicAPIClient
+
+	// Initialize Spotify client if credentials are provided
+	if cfg.SpotifyClientID != "" && cfg.SpotifyClientSecret != "" {
+		spotifyClient = musicapi.NewSpotifyClient(cfg.SpotifyClientID, cfg.SpotifyClientSecret)
+		log.Println("Spotify client initialized")
+	} else {
+		log.Println("Spotify credentials not provided, Spotify search disabled")
+	}
+
+	return searchservice.NewService(db, spotifyClient, nil, dataStore)
 }
 
 func withCORS(allowedOrigins []string, next http.Handler) http.Handler {
