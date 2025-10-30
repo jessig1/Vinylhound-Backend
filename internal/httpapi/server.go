@@ -61,6 +61,13 @@ type PlaylistService interface {
 	RemoveSong(ctx context.Context, token string, playlistID int64, songID int64) error
 }
 
+// FavoritesService coordinates favoriting workflows.
+type FavoritesService interface {
+	FavoriteTrack(ctx context.Context, token string, trackID int64) (*models.Favorite, bool, error)
+	UnfavoriteTrack(ctx context.Context, token string, trackID int64) error
+	ListTrackFavorites(ctx context.Context, token string) ([]*models.Favorite, error)
+}
+
 // SearchService provides unified search across music providers.
 type SearchService interface {
 	Search(ctx context.Context, opts searchservice.SearchOptions) (*searchservice.SearchResults, error)
@@ -77,6 +84,7 @@ type Server struct {
 	songs         SongService
 	ratings       RatingsService
 	playlists     PlaylistService
+	favorites     FavoritesService
 	searchService SearchService
 }
 
@@ -88,6 +96,7 @@ func New(
 	songs SongService,
 	ratings RatingsService,
 	playlists PlaylistService,
+	favorites FavoritesService,
 	searchService SearchService,
 ) *Server {
 	return &Server{
@@ -97,6 +106,7 @@ func New(
 		songs:         songs,
 		ratings:       ratings,
 		playlists:     playlists,
+		favorites:     favorites,
 		searchService: searchService,
 	}
 }
@@ -128,6 +138,13 @@ func (s *Server) Routes() http.Handler {
 	// Song routes
 	mux.HandleFunc("/api/v1/songs", s.handleSongs)
 	mux.HandleFunc("/api/v1/songs/", s.handleSong)
+
+	// Favorite track routes
+	mux.HandleFunc("/api/v1/me/favorites/tracks", s.handleFavoriteTracks)
+	mux.HandleFunc("/api/v1/me/favorites/tracks/", s.handleFavoriteTrack)
+	// Legacy favorites track routes (pre-v1 prefix)
+	mux.HandleFunc("/api/me/favorites/tracks", s.handleFavoriteTracks)
+	mux.HandleFunc("/api/me/favorites/tracks/", s.handleFavoriteTrack)
 
 	// Favorites routes
 	mux.HandleFunc("/api/v1/favorites", s.handleFavorites)

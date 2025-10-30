@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lib/pq"
+
 	"vinylhound/shared/go/models"
 )
 
@@ -48,8 +50,8 @@ func (s *Store) AddFavorite(ctx context.Context, token string, songID *int64, al
 		userID, songID, albumID, time.Now().UTC(),
 	).Scan(&favorite.ID, &favorite.UserID, &favorite.SongID, &favorite.AlbumID, &favorite.CreatedAt)
 	if err != nil {
-		// Check for unique constraint violation
-		if err.Error() == "pq: duplicate key value violates unique constraint" {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return nil, ErrFavoriteAlreadyExists
 		}
 		return nil, fmt.Errorf("insert favorite: %w", err)
@@ -61,7 +63,35 @@ func (s *Store) AddFavorite(ctx context.Context, token string, songID *int64, al
 		SELECT id FROM playlists WHERE user_id = $1 AND is_favorite = TRUE
 	`, userID).Scan(&favPlaylistID)
 	if err != nil {
-		return nil, fmt.Errorf("get favorites playlist: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			var username string
+			if err := tx.QueryRowContext(ctx, `
+				SELECT username FROM users WHERE id = $1
+			`, userID).Scan(&username); err != nil {
+				return nil, fmt.Errorf("lookup user for favorites playlist: %w", err)
+			}
+
+			err = tx.QueryRowContext(ctx, `
+				INSERT INTO playlists (title, description, owner, user_id, is_favorite, is_public)
+				VALUES ($1, $2, $3, $4, TRUE, FALSE)
+				RETURNING id
+			`, "Favorites", "Your favorited songs and albums", username, userID).Scan(&favPlaylistID)
+			if err != nil {
+				var pgErr *pq.Error
+				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+					// Playlist was created concurrently; fetch the existing id.
+					if err := tx.QueryRowContext(ctx, `
+						SELECT id FROM playlists WHERE user_id = $1 AND is_favorite = TRUE
+					`, userID).Scan(&favPlaylistID); err != nil {
+						return nil, fmt.Errorf("get favorites playlist after conflict: %w", err)
+					}
+				} else {
+					return nil, fmt.Errorf("create favorites playlist: %w", err)
+				}
+			}
+		} else {
+			return nil, fmt.Errorf("get favorites playlist: %w", err)
+		}
 	}
 
 	// If it's a song, add it directly to the favorites playlist
@@ -249,6 +279,38 @@ func (s *Store) ListFavorites(ctx context.Context, token string) ([]*models.Favo
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate favorites: %w", err)
+	}
+
+	return favorites, nil
+}
+
+// ListFavoriteTracks returns all favorited tracks (songs) for the user.
+func (s *Store) ListFavoriteTracks(ctx context.Context, token string) ([]*models.Favorite, error) {
+	userID, err := s.UserIDByToken(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, song_id, album_id, created_at
+		FROM favorites
+		WHERE user_id = $1 AND song_id IS NOT NULL
+		ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list favorite tracks: %w", err)
+	}
+	defer rows.Close()
+
+	var favorites []*models.Favorite
+	for rows.Next() {
+		var fav models.Favorite
+		if err := rows.Scan(&fav.ID, &fav.UserID, &fav.SongID, &fav.AlbumID, &fav.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan favorite track: %w", err)
+		}
+		favorites = append(favorites, &fav)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate favorite tracks: %w", err)
 	}
 
 	return favorites, nil

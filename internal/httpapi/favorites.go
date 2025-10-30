@@ -3,27 +3,21 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"vinylhound/internal/store"
 	"vinylhound/shared/go/models"
 )
 
-// FavoritesService coordinates favorites-related operations.
-type FavoritesService interface {
-	AddFavorite(token string, songID *int64, albumID *int64) (*models.Favorite, error)
-	RemoveFavorite(token string, songID *int64, albumID *int64) error
-	ListFavorites(token string) ([]*models.Favorite, error)
-	IsFavorite(token string, songID *int64, albumID *int64) (bool, error)
-	GetFavoritesPlaylist(token string) (*models.Playlist, error)
-}
-
-// handleFavorites handles GET (list) and POST (add) and DELETE (remove) for favorites
+// handleFavorites handles legacy favorites routes (not yet implemented).
 func (s *Server) handleFavorites(w http.ResponseWriter, r *http.Request) {
 	token := extractToken(r)
 	if token == "" {
-		http.Error(w, "Authorization required", http.StatusUnauthorized)
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "authorization required"})
 		return
 	}
 
@@ -35,7 +29,7 @@ func (s *Server) handleFavorites(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		s.removeFavorite(w, r, token)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "method not allowed"})
 	}
 }
 
@@ -43,13 +37,13 @@ func (s *Server) handleFavorites(w http.ResponseWriter, r *http.Request) {
 // GET /api/v1/favorites/check?song_id=123 or ?album_id=456
 func (s *Server) handleCheckFavorite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "method not allowed"})
 		return
 	}
 
 	token := extractToken(r)
 	if token == "" {
-		http.Error(w, "Authorization required", http.StatusUnauthorized)
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "authorization required"})
 		return
 	}
 
@@ -60,13 +54,13 @@ func (s *Server) handleCheckFavorite(w http.ResponseWriter, r *http.Request) {
 // GET /api/v1/favorites/playlist
 func (s *Server) handleFavoritesPlaylist(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "method not allowed"})
 		return
 	}
 
 	token := extractToken(r)
 	if token == "" {
-		http.Error(w, "Authorization required", http.StatusUnauthorized)
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "authorization required"})
 		return
 	}
 
@@ -76,29 +70,25 @@ func (s *Server) handleFavoritesPlaylist(w http.ResponseWriter, r *http.Request)
 func (s *Server) addFavorite(w http.ResponseWriter, r *http.Request, token string) {
 	var req models.FavoriteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid request body"})
 		return
 	}
 
-	// Note: We need a FavoritesService - for now we'll need to add this to the store
-	// This is a simplified version that would need proper service layer integration
-	http.Error(w, "Not implemented - requires favorites service", http.StatusNotImplemented)
+	writeJSON(w, http.StatusNotImplemented, errorResponse{Error: "favorites service not implemented"})
 }
 
 func (s *Server) removeFavorite(w http.ResponseWriter, r *http.Request, token string) {
 	var req models.FavoriteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid request body"})
 		return
 	}
 
-	// Note: We need a FavoritesService
-	http.Error(w, "Not implemented - requires favorites service", http.StatusNotImplemented)
+	writeJSON(w, http.StatusNotImplemented, errorResponse{Error: "favorites service not implemented"})
 }
 
 func (s *Server) listFavorites(w http.ResponseWriter, r *http.Request, token string) {
-	// Note: We need a FavoritesService
-	http.Error(w, "Not implemented - requires favorites service", http.StatusNotImplemented)
+	writeJSON(w, http.StatusNotImplemented, errorResponse{Error: "favorites service not implemented"})
 }
 
 func (s *Server) checkFavorite(w http.ResponseWriter, r *http.Request, token string) {
@@ -110,7 +100,7 @@ func (s *Server) checkFavorite(w http.ResponseWriter, r *http.Request, token str
 	if songIDStr != "" {
 		id, err := strconv.ParseInt(songIDStr, 10, 64)
 		if err != nil {
-			http.Error(w, "Invalid song_id", http.StatusBadRequest)
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid song_id"})
 			return
 		}
 		songID = &id
@@ -119,17 +109,144 @@ func (s *Server) checkFavorite(w http.ResponseWriter, r *http.Request, token str
 	if albumIDStr != "" {
 		id, err := strconv.ParseInt(albumIDStr, 10, 64)
 		if err != nil {
-			http.Error(w, "Invalid album_id", http.StatusBadRequest)
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid album_id"})
 			return
 		}
 		albumID = &id
 	}
 
-	// Note: We need a FavoritesService
-	http.Error(w, "Not implemented - requires favorites service", http.StatusNotImplemented)
+	if songID == nil && albumID == nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "song_id or album_id required"})
+		return
+	}
+
+	writeJSON(w, http.StatusNotImplemented, errorResponse{Error: "favorites service not implemented"})
 }
 
 func (s *Server) getFavoritesPlaylist(w http.ResponseWriter, r *http.Request, token string) {
-	// Note: We need a FavoritesService
-	http.Error(w, "Not implemented - requires favorites service", http.StatusNotImplemented)
+	writeJSON(w, http.StatusNotImplemented, errorResponse{Error: "favorites service not implemented"})
+}
+
+type favoriteTrackView struct {
+	TrackID     int64     `json:"track_id"`
+	FavoritedAt time.Time `json:"favorited_at"`
+}
+
+type favoriteTrackEnvelope struct {
+	Track favoriteTrackView `json:"track"`
+}
+
+type favoriteTracksResponse struct {
+	Tracks []favoriteTrackView `json:"tracks"`
+}
+
+func (s *Server) handleFavoriteTracks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "method not allowed"})
+		return
+	}
+
+	token := extractToken(r)
+	if token == "" {
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "missing bearer token"})
+		return
+	}
+
+	favorites, err := s.favorites.ListTrackFavorites(r.Context(), token)
+	if err != nil {
+		status, message := mapFavoritesError(err)
+		writeJSON(w, status, errorResponse{Error: message})
+		return
+	}
+
+	resp := favoriteTracksResponse{
+		Tracks: make([]favoriteTrackView, 0, len(favorites)),
+	}
+	for _, fav := range favorites {
+		if fav == nil || fav.SongID == nil {
+			continue
+		}
+		resp.Tracks = append(resp.Tracks, favoriteTrackView{
+			TrackID:     *fav.SongID,
+			FavoritedAt: fav.CreatedAt,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleFavoriteTrack(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/me/favorites/tracks/")
+	if path == r.URL.Path {
+		path = strings.TrimPrefix(r.URL.Path, "/api/me/favorites/tracks/")
+	}
+
+	if path == "" || path == r.URL.Path {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "track id required"})
+		return
+	}
+
+	trackID, err := strconv.ParseInt(path, 10, 64)
+	if err != nil || trackID <= 0 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "trackId must be a positive integer"})
+		return
+	}
+
+	token := extractToken(r)
+	if token == "" {
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "missing bearer token"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut:
+		fav, created, err := s.favorites.FavoriteTrack(r.Context(), token, trackID)
+		if err != nil {
+			status, message := mapFavoritesError(err)
+			writeJSON(w, status, errorResponse{Error: message})
+			return
+		}
+
+		if !created {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		if fav == nil || fav.SongID == nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "favorite created without track reference"})
+			return
+		}
+
+		w.Header().Set("Location", fmt.Sprintf("/api/v1/me/favorites/tracks/%d", trackID))
+		writeJSON(w, http.StatusCreated, favoriteTrackEnvelope{
+			Track: favoriteTrackView{
+				TrackID:     *fav.SongID,
+				FavoritedAt: fav.CreatedAt,
+			},
+		})
+	case http.MethodDelete:
+		if err := s.favorites.UnfavoriteTrack(r.Context(), token, trackID); err != nil {
+			status, message := mapFavoritesError(err)
+			writeJSON(w, status, errorResponse{Error: message})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.Header().Set("Allow", fmt.Sprintf("%s, %s", http.MethodPut, http.MethodDelete))
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "method not allowed"})
+	}
+}
+
+func mapFavoritesError(err error) (int, string) {
+	switch {
+	case errors.Is(err, store.ErrUnauthorized):
+		return http.StatusUnauthorized, "authorization required"
+	case errors.Is(err, store.ErrFavoriteNotFound):
+		return http.StatusNotFound, "favorite not found"
+	case errors.Is(err, store.ErrInvalidFavoriteType):
+		return http.StatusBadRequest, "invalid favorite type"
+	default:
+		return http.StatusInternalServerError, err.Error()
+	}
 }
