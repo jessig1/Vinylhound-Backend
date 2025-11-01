@@ -10,6 +10,8 @@ import (
 
 	"vinylhound/internal/app/artists"
 	"vinylhound/internal/app/songs"
+	"vinylhound/internal/musicapi"
+	"vinylhound/internal/searchservice"
 	"vinylhound/internal/store"
 	"vinylhound/shared/go/models"
 )
@@ -59,14 +61,61 @@ type PlaylistService interface {
 	RemoveSong(ctx context.Context, token string, playlistID int64, songID int64) error
 }
 
+// FavoritesService coordinates favoriting workflows.
+type FavoritesService interface {
+	FavoriteTrack(ctx context.Context, token string, trackID int64) (*models.Favorite, bool, error)
+	UnfavoriteTrack(ctx context.Context, token string, trackID int64) error
+	ListTrackFavorites(ctx context.Context, token string) ([]*models.Favorite, error)
+}
+
+// SearchService provides unified search across music providers.
+type SearchService interface {
+	Search(ctx context.Context, opts searchservice.SearchOptions) (*searchservice.SearchResults, error)
+	ImportAlbumForUser(ctx context.Context, token string, albumID string, provider musicapi.MusicProvider) error
+	ImportAlbum(ctx context.Context, albumID string, provider musicapi.MusicProvider) error
+	GetArtistWithAlbums(ctx context.Context, artistID string) (*musicapi.Artist, []musicapi.Album, error)
+	GetAlbumWithTracks(ctx context.Context, albumID string) (*musicapi.Album, []musicapi.Track, error)
+}
+
+// PlaceService coordinates place-related operations (venues and retailers)
+type PlaceService interface {
+	CreateVenue(ctx context.Context, token string, venue *models.Venue) (*models.Venue, error)
+	ListVenues(ctx context.Context, token string) ([]*models.Venue, error)
+	GetVenue(ctx context.Context, id int64) (*models.Venue, error)
+	UpdateVenue(ctx context.Context, token string, id int64, venue *models.Venue) (*models.Venue, error)
+	DeleteVenue(ctx context.Context, token string, id int64) error
+	CreateRetailer(ctx context.Context, token string, retailer *models.Retailer) (*models.Retailer, error)
+	ListRetailers(ctx context.Context, token string) ([]*models.Retailer, error)
+	GetRetailer(ctx context.Context, id int64) (*models.Retailer, error)
+	UpdateRetailer(ctx context.Context, token string, id int64, retailer *models.Retailer) (*models.Retailer, error)
+	DeleteRetailer(ctx context.Context, token string, id int64) error
+}
+
+// ConcertService coordinates concert-related operations
+type ConcertService interface {
+	Create(ctx context.Context, token string, concert *models.Concert) (*models.Concert, error)
+	List(ctx context.Context, token string) ([]*models.ConcertWithDetails, error)
+	Get(ctx context.Context, id int64) (*models.ConcertWithDetails, error)
+	Update(ctx context.Context, token string, id int64, concert *models.Concert) (*models.Concert, error)
+	Delete(ctx context.Context, token string, id int64) error
+	ListUpcoming(ctx context.Context, token string) ([]*models.ConcertWithDetails, error)
+	ListByVenue(ctx context.Context, venueID int64) ([]*models.ConcertWithDetails, error)
+	ListByArtist(ctx context.Context, token string, artistName string) ([]*models.ConcertWithDetails, error)
+	MarkAttended(ctx context.Context, token string, concertID int64, rating *int) error
+}
+
 // Server wires HTTP handlers to the underlying services.
 type Server struct {
-	users     UserService
-	artists   ArtistService
-	albums    AlbumService
-	songs     SongService
-	ratings   RatingsService
-	playlists PlaylistService
+	users         UserService
+	artists       ArtistService
+	albums        AlbumService
+	songs         SongService
+	ratings       RatingsService
+	playlists     PlaylistService
+	favorites     FavoritesService
+	searchService SearchService
+	places        PlaceService
+	concerts      ConcertService
 }
 
 // New configures a Server with the given Store implementation.
@@ -77,14 +126,22 @@ func New(
 	songs SongService,
 	ratings RatingsService,
 	playlists PlaylistService,
+	favorites FavoritesService,
+	searchService SearchService,
+	places PlaceService,
+	concerts ConcertService,
 ) *Server {
 	return &Server{
-		users:     users,
-		artists:   artists,
-		albums:    albums,
-		songs:     songs,
-		ratings:   ratings,
-		playlists: playlists,
+		users:         users,
+		artists:       artists,
+		albums:        albums,
+		songs:         songs,
+		ratings:       ratings,
+		playlists:     playlists,
+		favorites:     favorites,
+		searchService: searchService,
+		places:        places,
+		concerts:      concerts,
 	}
 }
 
@@ -115,6 +172,47 @@ func (s *Server) Routes() http.Handler {
 	// Song routes
 	mux.HandleFunc("/api/v1/songs", s.handleSongs)
 	mux.HandleFunc("/api/v1/songs/", s.handleSong)
+
+	// Favorite track routes
+	mux.HandleFunc("/api/v1/me/favorites/tracks", s.handleFavoriteTracks)
+	mux.HandleFunc("/api/v1/me/favorites/tracks/", s.handleFavoriteTrack)
+	// Legacy favorites track routes (pre-v1 prefix)
+	mux.HandleFunc("/api/me/favorites/tracks", s.handleFavoriteTracks)
+	mux.HandleFunc("/api/me/favorites/tracks/", s.handleFavoriteTrack)
+
+	// Favorites routes
+	mux.HandleFunc("/api/v1/favorites", s.handleFavorites)
+	mux.HandleFunc("/api/v1/favorites/check", s.handleCheckFavorite)
+	mux.HandleFunc("/api/v1/favorites/playlist", s.handleFavoritesPlaylist)
+
+	// Search routes
+	mux.HandleFunc("/api/v1/search", s.handleSearch)
+	mux.HandleFunc("/api/v1/import/album", s.handleImportAlbum)
+	mux.HandleFunc("/api/v1/providers", s.handleProviders)
+	mux.HandleFunc("/api/v1/artist", s.handleGetArtist)
+	mux.HandleFunc("/api/v1/album/details", s.handleGetAlbumDetails)
+
+	// Venue routes
+	mux.HandleFunc("POST /api/v1/venues", s.handleCreateVenue)
+	mux.HandleFunc("GET /api/v1/venues", s.handleListVenues)
+	mux.HandleFunc("GET /api/v1/venues/{id}", s.handleGetVenue)
+	mux.HandleFunc("PUT /api/v1/venues/{id}", s.handleUpdateVenue)
+	mux.HandleFunc("DELETE /api/v1/venues/{id}", s.handleDeleteVenue)
+
+	// Retailer routes
+	mux.HandleFunc("POST /api/v1/retailers", s.handleCreateRetailer)
+	mux.HandleFunc("GET /api/v1/retailers", s.handleListRetailers)
+	mux.HandleFunc("GET /api/v1/retailers/{id}", s.handleGetRetailer)
+	mux.HandleFunc("PUT /api/v1/retailers/{id}", s.handleUpdateRetailer)
+	mux.HandleFunc("DELETE /api/v1/retailers/{id}", s.handleDeleteRetailer)
+
+	// Concert routes
+	mux.HandleFunc("POST /api/v1/concerts", s.handleCreateConcert)
+	mux.HandleFunc("GET /api/v1/concerts", s.handleListConcerts)
+	mux.HandleFunc("GET /api/v1/concerts/{id}", s.handleGetConcert)
+	mux.HandleFunc("PUT /api/v1/concerts/{id}", s.handleUpdateConcert)
+	mux.HandleFunc("DELETE /api/v1/concerts/{id}", s.handleDeleteConcert)
+	mux.HandleFunc("POST /api/v1/concerts/{id}/attend", s.handleMarkConcertAttended)
 
 	// Legacy routes (for backward compatibility) - TODO: Remove after frontend migration
 	mux.HandleFunc("/api/signup", s.handleSignup)
@@ -345,8 +443,14 @@ func (s *Server) handleAlbumPreference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	trimmed := strings.TrimPrefix(r.URL.Path, "/api/me/albums/")
-	if trimmed == "" {
+	// Handle both /api/v1/me/albums/ and /api/me/albums/ paths
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/me/albums/")
+	if trimmed == r.URL.Path {
+		// Path didn't match v1, try legacy path
+		trimmed = strings.TrimPrefix(r.URL.Path, "/api/me/albums/")
+	}
+
+	if trimmed == "" || trimmed == r.URL.Path {
 		http.NotFound(w, r)
 		return
 	}

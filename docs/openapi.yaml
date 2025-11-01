@@ -1,0 +1,1721 @@
+openapi: 3.0.3
+info:
+  title: Vinylhound Backend API
+  version: 1.0.0
+  description: |
+    The Vinylhound backend provides RESTful endpoints for authentication, catalog browsing,
+    playlist management, favorites, and integrations with external music providers.
+    Legacy `/api/*` routes are proxied to the same handlers but are not documented here.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://api.vinylhound.example.com
+    description: Production (replace with real hostname when available)
+tags:
+  - name: Health
+    description: Service readiness and liveness checks
+  - name: Auth
+    description: Authentication and session management
+  - name: Users
+    description: User profile and preference management
+  - name: Albums
+    description: Album catalog and user collections
+  - name: Playlists
+    description: Playlist management
+  - name: Songs
+    description: Song catalog lookup
+  - name: Favorites
+    description: Track and album favorites
+  - name: Search
+    description: Search and external music provider integrations
+  - name: Providers
+    description: Music provider metadata
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Check API health
+      operationId: getHealth
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: OK
+  /api/v1/auth/signup:
+    post:
+      tags:
+        - Auth
+      summary: Register a new user
+      operationId: postSignup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '201':
+          description: Account created successfully
+        '400':
+          description: Invalid signup payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Username already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Authenticate and retrieve a session token
+      operationId: postLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication succeeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Invalid login payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/users/profile:
+    get:
+      tags:
+        - Users
+      summary: Retrieve the authenticated user's profile content
+      operationId: getUserProfile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current content preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserContent'
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+        - Users
+      summary: Replace the authenticated user's profile content
+      operationId: putUserProfile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserContent'
+      responses:
+        '204':
+          description: Profile updated
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/me/albums:
+    get:
+      tags:
+        - Albums
+      summary: List albums saved by the authenticated user
+      operationId: getUserAlbums
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Albums owned by the user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumList'
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+        - Albums
+      summary: Create a new album entry for the authenticated user
+      operationId: postUserAlbum
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlbumRequest'
+      responses:
+        '201':
+          description: Album created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Album'
+        '400':
+          description: Invalid album payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/me/albums/preferences:
+    get:
+      tags:
+        - Albums
+      summary: List album preferences for the authenticated user
+      operationId: getUserAlbumPreferences
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Album preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumPreferencesResponse'
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/me/albums/{albumId}/preference:
+    put:
+      tags:
+        - Albums
+      summary: Upsert an album preference
+      operationId: putUserAlbumPreference
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AlbumId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlbumPreferenceRequest'
+      responses:
+        '204':
+          description: Preference saved
+        '400':
+          description: Invalid request payload or album id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+        - Albums
+      summary: Remove an album preference
+      operationId: deleteUserAlbumPreference
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AlbumId'
+      responses:
+        '204':
+          description: Preference removed
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/albums:
+    get:
+      tags:
+        - Albums
+      summary: Search albums in the global catalog
+      operationId: getAlbums
+      parameters:
+        - name: artist
+          in: query
+          description: Filter by partial artist name
+          schema:
+            type: string
+        - name: title
+          in: query
+          description: Filter by partial album title
+          schema:
+            type: string
+        - name: genre
+          in: query
+          description: Filter by matching genre
+          schema:
+            type: string
+        - name: year
+          in: query
+          description: Filter by release year
+          schema:
+            type: integer
+        - name: rating
+          in: query
+          description: Filter by exact rating
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Albums matching the filter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumList'
+        '400':
+          description: Invalid query parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/albums/{albumId}:
+    get:
+      tags:
+        - Albums
+      summary: Retrieve a single album by id
+      operationId: getAlbumById
+      parameters:
+        - $ref: '#/components/parameters/AlbumId'
+      responses:
+        '200':
+          description: Album details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Album'
+        '400':
+          description: Invalid album id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/playlists:
+    get:
+      tags:
+        - Playlists
+      summary: List playlists owned by the authenticated user
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: getPlaylists
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Playlists for the current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistList'
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Authorization required
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    post:
+      tags:
+        - Playlists
+      summary: Create a new playlist
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: postPlaylist
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePlaylistRequest'
+      responses:
+        '201':
+          description: Playlist created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Invalid playlist payload
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Authorization required
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/playlists/{playlistId}:
+    get:
+      tags:
+        - Playlists
+      summary: Retrieve a playlist by id
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: getPlaylistById
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+      responses:
+        '200':
+          description: Playlist details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '404':
+          description: Playlist not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      tags:
+        - Playlists
+      summary: Update a playlist
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: putPlaylist
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePlaylistRequest'
+      responses:
+        '200':
+          description: Updated playlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Invalid playlist payload
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Playlist not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    delete:
+      tags:
+        - Playlists
+      summary: Delete a playlist
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: deletePlaylist
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+      responses:
+        '204':
+          description: Playlist removed
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Playlist not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/playlists/{playlistId}/songs:
+    post:
+      tags:
+        - Playlists
+      summary: Add a song to a playlist
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: postPlaylistSong
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPlaylistSongRequest'
+      responses:
+        '200':
+          description: Updated playlist including songs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Invalid request payload
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Playlist or song not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/playlists/{playlistId}/songs/{songId}:
+    delete:
+      tags:
+        - Playlists
+      summary: Remove a song from a playlist
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: deletePlaylistSong
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+        - $ref: '#/components/parameters/SongId'
+      responses:
+        '200':
+          description: Updated playlist including songs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Invalid playlist or song id
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Playlist or song not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/songs:
+    get:
+      tags:
+        - Songs
+      summary: Search songs
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: getSongs
+      parameters:
+        - name: q
+          in: query
+          description: Free-text search across title and artist
+          schema:
+            type: string
+        - name: artist
+          in: query
+          description: Filter by artist name
+          schema:
+            type: string
+        - name: album
+          in: query
+          description: Filter by album title
+          schema:
+            type: string
+        - name: album_id
+          in: query
+          description: Filter by album identifier
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Songs matching the filter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SongList'
+        '400':
+          description: Invalid album_id
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Invalid album_id
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/songs/{songId}:
+    get:
+      tags:
+        - Songs
+      summary: Retrieve a song by id
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: getSongById
+      parameters:
+        - $ref: '#/components/parameters/SongId'
+      responses:
+        '200':
+          description: Song details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Song'
+        '400':
+          description: Invalid song id
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Song not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/me/favorites/tracks:
+    get:
+      tags:
+        - Favorites
+      summary: List favorited track ids for the authenticated user
+      operationId: getFavoriteTracks
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Favorited track references
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FavoriteTrackList'
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/me/favorites/tracks/{trackId}:
+    put:
+      tags:
+        - Favorites
+      summary: Mark a track as favorite
+      operationId: putFavoriteTrack
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TrackId'
+      responses:
+        '201':
+          description: Favorite created
+          headers:
+            Location:
+              description: Path to the newly created favorite resource
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FavoriteTrackEnvelope'
+        '204':
+          description: Track was already favorited
+        '400':
+          description: Invalid track id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Track not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+        - Favorites
+      summary: Remove a track from favorites
+      operationId: deleteFavoriteTrack
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TrackId'
+      responses:
+        '204':
+          description: Favorite removed
+        '400':
+          description: Invalid track id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Favorite not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/favorites:
+    get:
+      tags:
+        - Favorites
+      summary: (Reserved) List favorites
+      description: Placeholder endpoint that currently returns HTTP 501.
+      operationId: getFavoritesLegacy
+      deprecated: true
+      responses:
+        '501':
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+        - Favorites
+      summary: (Reserved) Add a favorite
+      description: Placeholder endpoint that currently returns HTTP 501.
+      operationId: postFavoritesLegacy
+      deprecated: true
+      responses:
+        '501':
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+        - Favorites
+      summary: (Reserved) Remove a favorite
+      description: Placeholder endpoint that currently returns HTTP 501.
+      operationId: deleteFavoritesLegacy
+      deprecated: true
+      responses:
+        '501':
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/favorites/check:
+    get:
+      tags:
+        - Favorites
+      summary: (Reserved) Check if an item is favorited
+      description: Placeholder endpoint that currently returns HTTP 501.
+      operationId: getFavoritesCheck
+      parameters:
+        - name: song_id
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Song identifier to check
+        - name: album_id
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Album identifier to check
+      responses:
+        '501':
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/favorites/playlist:
+    get:
+      tags:
+        - Favorites
+      summary: (Reserved) Retrieve favorites playlist
+      description: Placeholder endpoint that currently returns HTTP 501.
+      operationId: getFavoritesPlaylist
+      responses:
+        '501':
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/search:
+    post:
+      tags:
+        - Search
+      summary: Perform a unified search across configured providers
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: postSearch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Aggregated search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResults'
+        '400':
+          description: Invalid request payload
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/import/album:
+    post:
+      tags:
+        - Search
+      summary: Import an album from an external provider into the user's library
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: postImportAlbum
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportAlbumRequest'
+      responses:
+        '200':
+          description: Album imported successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: Invalid request payload
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/providers:
+    get:
+      tags:
+        - Providers
+      summary: List supported music providers
+      operationId: getProviders
+      responses:
+        '200':
+          description: Supported providers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvidersResponse'
+  /api/v1/artist:
+    get:
+      tags:
+        - Search
+      summary: Retrieve artist details from the external provider
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: getExternalArtist
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Provider-specific artist identifier
+      responses:
+        '200':
+          description: Artist details and related albums
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistDetailResponse'
+        '400':
+          description: Missing artist id
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/album/details:
+    get:
+      tags:
+        - Search
+      summary: Retrieve album details and track listing from the external provider
+      description: |
+        Error responses currently return plain-text payloads.
+      operationId: getExternalAlbumDetails
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Provider-specific album identifier
+      responses:
+        '200':
+          description: Album details and tracks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumDetailResponse'
+        '400':
+          description: Missing album id
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Unexpected server error
+          content:
+            text/plain:
+              schema:
+                type: string
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    AlbumId:
+      name: albumId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+      description: Numeric album identifier
+    PlaylistId:
+      name: playlistId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+      description: Numeric playlist identifier
+    SongId:
+      name: songId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+      description: Numeric song identifier
+    TrackId:
+      name: trackId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+      description: Numeric track identifier
+  schemas:
+    SignupRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+        content:
+          type: array
+          items:
+            type: string
+          description: Optional list of preferred content tags
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+    TokenResponse:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+          description: JWT access token
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+    UserContent:
+      type: object
+      required:
+        - content
+      properties:
+        content:
+          type: array
+          items:
+            type: string
+    Album:
+      type: object
+      required:
+        - id
+        - artist
+        - title
+        - releaseYear
+        - trackList
+        - genreList
+        - rating
+      properties:
+        id:
+          type: integer
+          format: int64
+        artist:
+          type: string
+        title:
+          type: string
+        releaseYear:
+          type: integer
+        trackList:
+          type: array
+          items:
+            type: string
+        genreList:
+          type: array
+          items:
+            type: string
+        rating:
+          type: integer
+        averageRating:
+          type: number
+          format: double
+        ratingCount:
+          type: integer
+    AlbumRequest:
+      type: object
+      required:
+        - artist
+        - title
+        - releaseYear
+        - trackList
+        - genreList
+        - rating
+      properties:
+        artist:
+          type: string
+        title:
+          type: string
+        releaseYear:
+          type: integer
+        trackList:
+          type: array
+          items:
+            type: string
+        genreList:
+          type: array
+          items:
+            type: string
+        rating:
+          type: integer
+    AlbumList:
+      type: object
+      required:
+        - albums
+      properties:
+        albums:
+          type: array
+          items:
+            $ref: '#/components/schemas/Album'
+    AlbumPreference:
+      type: object
+      required:
+        - album
+        - favorited
+      properties:
+        album:
+          $ref: '#/components/schemas/Album'
+        rating:
+          type: integer
+          nullable: true
+        favorited:
+          type: boolean
+    AlbumPreferenceRequest:
+      type: object
+      required:
+        - favorited
+      properties:
+        rating:
+          type: integer
+          nullable: true
+          description: Rating from 1-5; set to null to clear
+        favorited:
+          type: boolean
+          description: Whether the album is marked as a favorite
+    AlbumPreferencesResponse:
+      type: object
+      required:
+        - preferences
+      properties:
+        preferences:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlbumPreference'
+    PlaylistSong:
+      type: object
+      required:
+        - id
+        - title
+        - artist
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        length_seconds:
+          type: integer
+        genre:
+          type: string
+    Playlist:
+      type: object
+      required:
+        - id
+        - title
+        - owner
+        - created_at
+        - updated_at
+        - song_count
+        - tags
+        - is_public
+        - is_favorite
+        - songs
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        description:
+          type: string
+        owner:
+          type: string
+        user_id:
+          type: integer
+          format: int64
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        song_count:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
+        is_public:
+          type: boolean
+        is_favorite:
+          type: boolean
+        songs:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlaylistSong'
+    PlaylistList:
+      type: object
+      required:
+        - playlists
+      properties:
+        playlists:
+          type: array
+          items:
+            $ref: '#/components/schemas/Playlist'
+    CreatePlaylistRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        isPublic:
+          type: boolean
+          default: false
+        tags:
+          type: array
+          items:
+            type: string
+        songs:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlaylistSong'
+    UpdatePlaylistRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        isPublic:
+          type: boolean
+        tags:
+          type: array
+          items:
+            type: string
+        songs:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlaylistSong'
+    AddPlaylistSongRequest:
+      type: object
+      required:
+        - song_id
+      properties:
+        song_id:
+          type: integer
+          format: int64
+    Song:
+      type: object
+      required:
+        - id
+        - title
+        - artist
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        artist:
+          type: string
+        album_id:
+          type: integer
+          format: int64
+          nullable: true
+        album:
+          type: string
+        duration:
+          type: integer
+          description: Duration in seconds
+        track_num:
+          type: integer
+        genre:
+          type: string
+    SongList:
+      type: object
+      required:
+        - songs
+      properties:
+        songs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Song'
+    FavoriteTrack:
+      type: object
+      required:
+        - track_id
+        - favorited_at
+      properties:
+        track_id:
+          type: integer
+          format: int64
+        favorited_at:
+          type: string
+          format: date-time
+    FavoriteTrackList:
+      type: object
+      required:
+        - tracks
+      properties:
+        tracks:
+          type: array
+          items:
+            $ref: '#/components/schemas/FavoriteTrack'
+    FavoriteTrackEnvelope:
+      type: object
+      required:
+        - track
+      properties:
+        track:
+          $ref: '#/components/schemas/FavoriteTrack'
+    SearchRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+        type:
+          type: string
+          enum:
+            - artist
+            - album
+            - track
+            - all
+        provider:
+          type: string
+          enum:
+            - spotify
+            - apple_music
+            - all
+        limit:
+          type: integer
+          default: 20
+        store_results:
+          type: boolean
+          default: false
+    SearchResults:
+      type: object
+      required:
+        - artists
+        - albums
+        - tracks
+      properties:
+        artists:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExternalArtist'
+        albums:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExternalAlbum'
+        tracks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExternalTrack'
+    ExternalArtist:
+      type: object
+      required:
+        - external_id
+        - name
+        - provider
+      properties:
+        external_id:
+          type: string
+        name:
+          type: string
+        provider:
+          $ref: '#/components/schemas/MusicProvider'
+        image_url:
+          type: string
+          format: uri
+        biography:
+          type: string
+        genres:
+          type: array
+          items:
+            type: string
+        popularity:
+          type: integer
+        external_url:
+          type: string
+          format: uri
+    ExternalAlbum:
+      type: object
+      required:
+        - external_id
+        - title
+        - artist
+        - provider
+      properties:
+        external_id:
+          type: string
+        title:
+          type: string
+        artist:
+          type: string
+        artist_id:
+          type: string
+        provider:
+          $ref: '#/components/schemas/MusicProvider'
+        release_year:
+          type: integer
+        release_date:
+          type: string
+        genre:
+          type: string
+        cover_url:
+          type: string
+          format: uri
+        track_count:
+          type: integer
+        external_url:
+          type: string
+          format: uri
+    ExternalTrack:
+      type: object
+      required:
+        - external_id
+        - title
+        - artist
+        - provider
+        - duration
+      properties:
+        external_id:
+          type: string
+        title:
+          type: string
+        artist:
+          type: string
+        artist_id:
+          type: string
+        album:
+          type: string
+        album_id:
+          type: string
+        provider:
+          $ref: '#/components/schemas/MusicProvider'
+        duration:
+          type: integer
+          description: Duration in seconds
+        track_number:
+          type: integer
+        disc_number:
+          type: integer
+        isrc:
+          type: string
+        external_url:
+          type: string
+          format: uri
+        preview_url:
+          type: string
+          format: uri
+    MusicProvider:
+      type: string
+      enum:
+        - spotify
+        - apple_music
+    ProvidersResponse:
+      type: object
+      required:
+        - providers
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Provider'
+    Provider:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    ImportAlbumRequest:
+      type: object
+      required:
+        - album_id
+        - provider
+      properties:
+        album_id:
+          type: string
+        provider:
+          $ref: '#/components/schemas/MusicProvider'
+    MessageResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+    ArtistDetailResponse:
+      type: object
+      required:
+        - artist
+        - albums
+      properties:
+        artist:
+          $ref: '#/components/schemas/ExternalArtist'
+        albums:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExternalAlbum'
+    AlbumDetailResponse:
+      type: object
+      required:
+        - album
+        - tracks
+      properties:
+        album:
+          $ref: '#/components/schemas/ExternalAlbum'
+        tracks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExternalTrack'

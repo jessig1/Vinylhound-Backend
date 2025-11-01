@@ -24,8 +24,15 @@ func main() {
 	dbName := os.Getenv("DB_NAME")
 	dbHost := os.Getenv("DB_HOST")
 	dbPort := os.Getenv("DB_PORT")
+	if dbHost == "" {
+		dbHost = "localhost"
+	}
 	if dbPort == "" {
-		dbPort = "5432"
+		if dbHost == "localhost" || dbHost == "127.0.0.1" {
+			dbPort = "54320"
+		} else {
+			dbPort = "5432"
+		}
 	}
 
 	// Connect to database

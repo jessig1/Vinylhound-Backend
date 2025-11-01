@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -77,6 +78,18 @@ func (s *Store) CreateUser(username, password string, content []string) error {
 			VALUES ($1, $2, $3)
 		`, userID, i, entry); err != nil {
 			return fmt.Errorf("insert content: %w", err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO playlists (title, description, owner, user_id, is_favorite, is_public)
+		VALUES ($1, $2, $3, $4, TRUE, FALSE)
+	`, "Favorites", "Your favorited songs and albums", username, userID); err != nil {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			// Favorites playlist was created by a trigger; continue.
+		} else {
+			return fmt.Errorf("create favorites playlist: %w", err)
 		}
 	}
 
@@ -209,7 +222,7 @@ func (s *Store) UpdateContentByToken(token string, content []string) error {
 	return nil
 }
 
-// UserIDByToken returns the user ID associated with a valid session token.
+// UserIDByToken returns the user identifier associated with the given session token.
 func (s *Store) UserIDByToken(ctx context.Context, token string) (int64, error) {
 	return s.userIDForToken(ctx, token)
 }

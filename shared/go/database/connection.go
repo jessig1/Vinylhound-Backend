@@ -25,9 +25,19 @@ func LoadConfig() (*Config, error) {
 	// Load .env file if it exists
 	_ = godotenv.Load()
 
+	host := getEnv("DB_HOST", "localhost")
+	port := os.Getenv("DB_PORT")
+	if port == "" {
+		if host == "localhost" || host == "127.0.0.1" {
+			port = "54320"
+		} else {
+			port = "5432"
+		}
+	}
+
 	return &Config{
-		Host:     getEnv("DB_HOST", "localhost"),
-		Port:     getEnv("DB_PORT", "5432"),
+		Host:     host,
+		Port:     port,
 		User:     getEnv("DB_USER", "vinylhound"),
 		Password: getEnv("DB_PASSWORD", "localpassword"),
 		Database: getEnv("DB_NAME", "vinylhound"),

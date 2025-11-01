@@ -33,7 +33,11 @@ func main() {
 	}
 	dbPort := os.Getenv("DB_PORT")
 	if dbPort == "" {
-		dbPort = "5432"
+		if dbHost == "localhost" || dbHost == "127.0.0.1" {
+			dbPort = "54320"
+		} else {
+			dbPort = "5432"
+		}
 	}
 	dbUser := os.Getenv("DB_USER")
 	if dbUser == "" {
