@@ -2,10 +2,15 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
 	"net/http"
+	"strings"
 
 	"vinylhound/internal/musicapi"
 	"vinylhound/internal/searchservice"
+	"vinylhound/internal/store"
 )
 
 // handleSearch performs unified search across music providers
@@ -62,22 +67,32 @@ func (s *Server) handleImportAlbum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	token := extractBearerToken(r.Header.Get("Authorization"))
+	if token == "" {
+		log.Println("ImportAlbum: missing bearer token")
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
 	var req struct {
 		AlbumID  string `json:"album_id"`
 		Provider string `json:"provider"` // "spotify" or "apple_music"
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("ImportAlbum: invalid request body: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.AlbumID == "" {
+		log.Println("ImportAlbum: missing album_id")
 		http.Error(w, "Album ID is required", http.StatusBadRequest)
 		return
 	}
 
 	if req.Provider == "" {
+		log.Println("ImportAlbum: missing provider")
 		http.Error(w, "Provider is required", http.StatusBadRequest)
 		return
 	}
@@ -89,19 +104,46 @@ func (s *Server) handleImportAlbum(w http.ResponseWriter, r *http.Request) {
 	case "apple_music":
 		provider = musicapi.ProviderAppleMusic
 	default:
+		log.Printf("ImportAlbum: invalid provider %q", req.Provider)
 		http.Error(w, "Invalid provider. Must be 'spotify' or 'apple_music'", http.StatusBadRequest)
 		return
 	}
 
-	if err := s.searchService.ImportAlbum(r.Context(), req.AlbumID, provider); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	log.Printf("ImportAlbum: attempting import album=%s provider=%s", req.AlbumID, provider)
+
+	if err := s.searchService.ImportAlbumForUser(r.Context(), token, req.AlbumID, provider); err != nil {
+		if errors.Is(err, store.ErrUnauthorized) {
+			log.Printf("ImportAlbum: unauthorized import attempt for album=%s provider=%s", req.AlbumID, provider)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		log.Printf("ImportAlbum: ERROR - failed importing album=%s provider=%s: %v", req.AlbumID, provider, err)
+
+		// Return the actual error message to help with debugging
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: fmt.Sprintf("Failed to import album: %v", err)})
 		return
 	}
+
+	log.Printf("ImportAlbum: completed import album=%s provider=%s", req.AlbumID, provider)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Album imported successfully",
 	})
+}
+
+func extractBearerToken(header string) string {
+	if header == "" {
+		return ""
+	}
+	parts := strings.Fields(header)
+	if len(parts) != 2 {
+		return ""
+	}
+	if !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
 }
 
 // handleProviders returns list of available music providers

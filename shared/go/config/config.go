@@ -97,13 +97,20 @@ func (c *Config) loadDatabase() error {
 
 	// If not present, construct from individual parameters
 	if c.Database.URL == "" {
-		c.Database.Host = os.Getenv("DB_HOST")
+		c.Database.Host = getEnvOrDefault("DB_HOST", "localhost")
 		c.Database.User = os.Getenv("DB_USER")
 		c.Database.Password = os.Getenv("DB_PASSWORD")
 		c.Database.Name = os.Getenv("DB_NAME")
 		c.Database.SSLMode = getEnvOrDefault("DB_SSLMODE", "disable")
 
-		portStr := getEnvOrDefault("DB_PORT", "5432")
+		portStr := os.Getenv("DB_PORT")
+		if portStr == "" {
+			if c.Database.Host == "localhost" || c.Database.Host == "127.0.0.1" {
+				portStr = "54320"
+			} else {
+				portStr = "5432"
+			}
+		}
 		port, err := strconv.Atoi(portStr)
 		if err != nil {
 			return fmt.Errorf("invalid DB_PORT: %w", err)

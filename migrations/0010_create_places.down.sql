@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS retailers;
+DROP TABLE IF EXISTS venues;

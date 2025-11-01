@@ -215,6 +215,10 @@ func (noopSearchService) ImportAlbum(context.Context, string, musicapi.MusicProv
 	return nil
 }
 
+func (noopSearchService) ImportAlbumForUser(context.Context, string, string, musicapi.MusicProvider) error {
+	return nil
+}
+
 func (noopSearchService) GetArtistWithAlbums(context.Context, string) (*musicapi.Artist, []musicapi.Album, error) {
 	return nil, nil, nil
 }

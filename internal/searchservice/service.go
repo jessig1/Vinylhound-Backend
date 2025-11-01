@@ -3,8 +3,12 @@ package searchservice
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,28 +18,28 @@ import (
 
 // Service provides unified search across multiple music providers and stores results
 type Service struct {
-	db              *sql.DB
-	spotifyClient   musicapi.MusicAPIClient
+	db               *sql.DB
+	spotifyClient    musicapi.MusicAPIClient
 	appleMusicClient musicapi.MusicAPIClient
-	store           *store.Store
+	store            *store.Store
 }
 
 // NewService creates a new search service
 func NewService(db *sql.DB, spotifyClient, appleMusicClient musicapi.MusicAPIClient, st *store.Store) *Service {
 	return &Service{
-		db:              db,
-		spotifyClient:   spotifyClient,
+		db:               db,
+		spotifyClient:    spotifyClient,
 		appleMusicClient: appleMusicClient,
-		store:           st,
+		store:            st,
 	}
 }
 
 // SearchOptions defines search parameters
 type SearchOptions struct {
-	Query       string
-	Type        string // "artist", "album", "track", or "all"
-	Provider    string // "spotify", "apple_music", or "all"
-	Limit       int
+	Query        string
+	Type         string // "artist", "album", "track", or "all"
+	Provider     string // "spotify", "apple_music", or "all"
+	Limit        int
 	StoreResults bool // Whether to store results in database
 }
 
@@ -231,142 +235,76 @@ func (s *Service) storeArtist(ctx context.Context, artist musicapi.Artist) error
 
 // storeAlbum stores an album in the database if it doesn't exist
 func (s *Service) storeAlbum(ctx context.Context, album musicapi.Album) error {
-	// Check if album already exists
-	var exists bool
-	err := s.db.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM albums WHERE title = $1 AND artist = $2)`,
-		album.Title, album.Artist).Scan(&exists)
-	if err != nil {
-		return fmt.Errorf("check album exists: %w", err)
-	}
-
-	if exists {
-		return nil // Already exists
-	}
-
-	// Insert new album
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO albums (title, artist, release_year, genre, cover_url, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $6)
-		ON CONFLICT DO NOTHING`,
-		album.Title,
-		album.Artist,
-		nullIfZero(album.ReleaseYear),
-		nullIfEmpty(album.Genre),
-		nullIfEmpty(album.CoverURL),
-		time.Now().UTC(),
-	)
-
-	if err != nil {
-		return fmt.Errorf("insert album: %w", err)
-	}
-
-	log.Printf("Stored album: %s by %s (from %s)", album.Title, album.Artist, album.Provider)
+	// Catalog persistence requires user context; noop for provider result caching.
 	return nil
 }
 
 // storeTrack stores a track in the database if it doesn't exist
 func (s *Service) storeTrack(ctx context.Context, track musicapi.Track) error {
-	// Get or create album first
-	var albumID sql.NullInt64
-	if track.Album != "" {
-		var aid int64
-		err := s.db.QueryRowContext(ctx,
-			`SELECT id FROM albums WHERE title = $1 AND artist = $2`,
-			track.Album, track.Artist).Scan(&aid)
-
-		if err == nil {
-			albumID = sql.NullInt64{Int64: aid, Valid: true}
-		} else if err == sql.ErrNoRows {
-			// Album doesn't exist, create it
-			err = s.db.QueryRowContext(ctx, `
-				INSERT INTO albums (title, artist, created_at, updated_at)
-				VALUES ($1, $2, $3, $3)
-				RETURNING id`,
-				track.Album,
-				track.Artist,
-				time.Now().UTC(),
-			).Scan(&aid)
-
-			if err == nil {
-				albumID = sql.NullInt64{Int64: aid, Valid: true}
-				log.Printf("Created album: %s by %s", track.Album, track.Artist)
-			} else {
-				log.Printf("Failed to create album for track: %v", err)
-			}
-		}
-	}
-
-	// Check if track already exists
-	var exists bool
-	err := s.db.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM songs WHERE title = $1 AND artist = $2)`,
-		track.Title, track.Artist).Scan(&exists)
-	if err != nil {
-		return fmt.Errorf("check track exists: %w", err)
-	}
-
-	if exists {
-		return nil // Already exists
-	}
-
-	// Insert new track
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO songs (title, artist, album_id, duration, track_num, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $6)
-		ON CONFLICT DO NOTHING`,
-		track.Title,
-		track.Artist,
-		albumID,
-		nullIfZero(track.Duration),
-		nullIfZero(track.TrackNumber),
-		time.Now().UTC(),
-	)
-
-	if err != nil {
-		return fmt.Errorf("insert track: %w", err)
-	}
-
-	log.Printf("Stored track: %s by %s (from %s)", track.Title, track.Artist, track.Provider)
+	// Catalog persistence requires user context; noop for provider result caching.
 	return nil
 }
 
-// ImportAlbum fetches full album details from a provider and stores it with all tracks
+// ImportAlbum fetches album details from a provider. Without user context the
+// album is not persisted, but the fetch can be used to validate connectivity.
 func (s *Service) ImportAlbum(ctx context.Context, albumID string, provider musicapi.MusicProvider) error {
-	var client musicapi.MusicAPIClient
-
-	switch provider {
-	case musicapi.ProviderSpotify:
-		client = s.spotifyClient
-	case musicapi.ProviderAppleMusic:
-		client = s.appleMusicClient
-	default:
-		return fmt.Errorf("unsupported provider: %s", provider)
+	client, err := s.clientForProvider(provider)
+	if err != nil {
+		return err
 	}
 
-	if client == nil {
-		return fmt.Errorf("provider %s not configured", provider)
+	log.Printf("ImportAlbum: validating album=%s provider=%s", albumID, provider)
+
+	if _, _, err := client.GetAlbum(ctx, albumID); err != nil {
+		return fmt.Errorf("fetch album: %w", err)
 	}
 
-	// Fetch album details
+	log.Printf("ImportAlbum: validation succeeded album=%s provider=%s", albumID, provider)
+
+	return nil
+}
+
+// ImportAlbumForUser fetches a full album and stores it (and its tracks) for the authenticated user.
+func (s *Service) ImportAlbumForUser(ctx context.Context, token string, albumID string, provider musicapi.MusicProvider) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return store.ErrUnauthorized
+	}
+	if s.store == nil {
+		log.Println("ImportAlbumForUser: store not configured")
+		return errors.New("store not configured")
+	}
+
+	userID, err := s.store.UserIDByToken(ctx, token)
+	if err != nil {
+		return err
+	}
+
+	client, err := s.clientForProvider(provider)
+	if err != nil {
+		return err
+	}
+
 	album, tracks, err := client.GetAlbum(ctx, albumID)
 	if err != nil {
 		return fmt.Errorf("fetch album: %w", err)
 	}
 
-	// Store album
-	if err := s.storeAlbum(ctx, *album); err != nil {
-		return fmt.Errorf("store album: %w", err)
+	log.Printf("ImportAlbumForUser: fetched album=%s provider=%s tracks=%d user=%d", album.Title, provider, len(tracks), userID)
+
+	storedAlbumID, err := s.storeAlbumForUser(ctx, userID, *album, tracks)
+	if err != nil {
+		log.Printf("ImportAlbumForUser: failed storing album user=%d album=%s: %v", userID, album.Title, err)
+		return err
 	}
 
-	// Store all tracks
 	for _, track := range tracks {
-		if err := s.storeTrack(ctx, track); err != nil {
+		if err := s.storeTrackForUser(ctx, storedAlbumID, *album, track); err != nil {
 			log.Printf("Failed to store track %s: %v", track.Title, err)
 		}
 	}
 
-	log.Printf("Imported album: %s by %s with %d tracks", album.Title, album.Artist, len(tracks))
+	log.Printf("Imported album: %s by %s with %d tracks for user %d", album.Title, album.Artist, len(tracks), userID)
 	return nil
 }
 
@@ -384,6 +322,160 @@ func nullIfZero(i int) sql.NullInt32 {
 		return sql.NullInt32{Valid: false}
 	}
 	return sql.NullInt32{Int32: int32(i), Valid: true}
+}
+
+func (s *Service) clientForProvider(provider musicapi.MusicProvider) (musicapi.MusicAPIClient, error) {
+	switch provider {
+	case musicapi.ProviderSpotify:
+		if s.spotifyClient == nil {
+			return nil, fmt.Errorf("provider %s not configured", provider)
+		}
+		return s.spotifyClient, nil
+	case musicapi.ProviderAppleMusic:
+		if s.appleMusicClient == nil {
+			return nil, fmt.Errorf("provider %s not configured", provider)
+		}
+		return s.appleMusicClient, nil
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s", provider)
+	}
+}
+
+func (s *Service) storeAlbumForUser(ctx context.Context, userID int64, album musicapi.Album, tracks []musicapi.Track) (int64, error) {
+	if userID <= 0 {
+		return 0, fmt.Errorf("invalid user id %d", userID)
+	}
+
+	var albumID int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id
+		FROM albums
+		WHERE user_id = $1 AND artist = $2 AND title = $3
+	`, userID, album.Artist, album.Title).Scan(&albumID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("lookup album: %w", err)
+	}
+
+	trackTitlesJSON, err := json.Marshal(extractTrackTitles(tracks))
+	if err != nil {
+		return 0, fmt.Errorf("marshal track titles: %w", err)
+	}
+	genresJSON, err := json.Marshal(extractGenres(album))
+	if err != nil {
+		return 0, fmt.Errorf("marshal genres: %w", err)
+	}
+	releaseYear := resolveReleaseYear(album)
+
+	if albumID != 0 {
+		log.Printf("storeAlbumForUser: updating existing album id=%d user=%d title=%q", albumID, userID, album.Title)
+		if _, err := s.db.ExecContext(ctx, `
+			UPDATE albums
+			SET tracks = $1::jsonb,
+			    genres = $2::jsonb,
+			    release_year = $3
+			WHERE id = $4
+		`, string(trackTitlesJSON), string(genresJSON), releaseYear, albumID); err != nil {
+			log.Printf("Failed to update album metadata (id=%d): %v", albumID, err)
+		}
+		return albumID, nil
+	}
+
+	const defaultRating = 3
+	log.Printf("storeAlbumForUser: inserting album user=%d title=%q rating=%d", userID, album.Title, defaultRating)
+	err = s.db.QueryRowContext(ctx, `
+		INSERT INTO albums (user_id, artist, title, release_year, tracks, genres, rating)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+		RETURNING id
+	`, userID, album.Artist, album.Title, releaseYear, string(trackTitlesJSON), string(genresJSON), defaultRating).Scan(&albumID)
+	if err != nil {
+		return 0, fmt.Errorf("insert album: %w", err)
+	}
+
+	return albumID, nil
+}
+
+func (s *Service) storeTrackForUser(ctx context.Context, albumID int64, album musicapi.Album, track musicapi.Track) error {
+	title := strings.TrimSpace(track.Title)
+	if title == "" {
+		return nil
+	}
+	artist := strings.TrimSpace(track.Artist)
+	if artist == "" {
+		artist = strings.TrimSpace(album.Artist)
+	}
+	if artist == "" {
+		artist = album.Artist
+	}
+
+	var exists bool
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM songs
+			WHERE album_id = $1 AND title = $2 AND artist = $3
+		)
+	`, albumID, title, artist).Scan(&exists); err != nil {
+		return fmt.Errorf("check track exists: %w", err)
+	}
+	if exists {
+		return nil
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO songs (title, artist, album_id, duration, track_num)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT DO NOTHING
+	`, title, artist, albumID, nullIfZero(track.Duration), nullIfZero(track.TrackNumber))
+	if err != nil {
+		return fmt.Errorf("insert track: %w", err)
+	}
+
+	return nil
+}
+
+func extractTrackTitles(tracks []musicapi.Track) []string {
+	var titles []string
+	for _, track := range tracks {
+		title := strings.TrimSpace(track.Title)
+		if title != "" {
+			titles = append(titles, title)
+		}
+	}
+	return titles
+}
+
+func extractGenres(album musicapi.Album) []string {
+	if album.Genre == "" {
+		return []string{}
+	}
+	parts := strings.Split(album.Genre, ",")
+	var genres []string
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			genres = append(genres, trimmed)
+		}
+	}
+	return genres
+}
+
+func resolveReleaseYear(album musicapi.Album) int {
+	if album.ReleaseYear > 0 {
+		return album.ReleaseYear
+	}
+	if year := parseYear(album.ReleaseDate); year > 0 {
+		return year
+	}
+	return 1970
+}
+
+func parseYear(value string) int {
+	if len(value) < 4 {
+		return 0
+	}
+	year, err := strconv.Atoi(value[:4])
+	if err != nil || year <= 0 {
+		return 0
+	}
+	return year
 }
 
 // GetArtistWithAlbums fetches full artist details and all their albums from Spotify

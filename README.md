@@ -41,7 +41,7 @@ docker run --name vinylhound-db \
   -e POSTGRES_PASSWORD=localpassword \
   -e POSTGRES_USER=vinylhound \
   -e POSTGRES_DB=vinylhound \
-  -p 5432:5432 \
+  -p 54320:5432 \
   -d postgres:16
 
 # Or use existing PostgreSQL instance and update DATABASE_URL in .env
@@ -99,8 +99,8 @@ All configuration is done via environment variables. See [.env.example](.env.exa
 ### Required Variables
 
 ```bash
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/vinylhound
+# Database (container exposes 5432 internally, 54320 on the host)
+DATABASE_URL=postgresql://user:password@localhost:54320/vinylhound
 
 # Security
 JWT_SECRET=your-secret-key-min-16-chars
@@ -129,6 +129,18 @@ ENV=development       # development, staging, production
 ### Authentication
 - `POST /api/v1/auth/signup` - Create new user account
 - `POST /api/v1/auth/login` - Authenticate user and get token
+
+### Interactive API Docs (Swagger UI)
+
+The OpenAPI contract lives at `docs/openapi.yaml`. To explore it with Swagger UI:
+
+```bash
+# from the repo root, serve the docs directory (choose any static file server)
+python -m http.server 8081 --directory docs
+# then open http://localhost:8081/swagger/ in your browser
+```
+
+Any static file server works (`npx serve docs`, `go run cmd/...`, etc.) as long as `docs/openapi.yaml` and `docs/swagger/index.html` are hosted under the same origin.
 
 ### User Profile
 - `GET /api/v1/users/profile` - Get user profile (requires auth)
@@ -305,7 +317,7 @@ docker run -d \
 docker ps | grep postgres
 
 # Test connection
-psql postgresql://vinylhound:localpassword@localhost:5432/vinylhound
+psql postgresql://vinylhound:localpassword@localhost:54320/vinylhound
 
 # Check DATABASE_URL format
 echo $DATABASE_URL

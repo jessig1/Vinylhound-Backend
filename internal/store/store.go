@@ -222,7 +222,7 @@ func (s *Store) UpdateContentByToken(token string, content []string) error {
 	return nil
 }
 
-// UserIDByToken returns the user ID associated with a valid session token.
+// UserIDByToken returns the user identifier associated with the given session token.
 func (s *Store) UserIDByToken(ctx context.Context, token string) (int64, error) {
 	return s.userIDForToken(ctx, token)
 }
