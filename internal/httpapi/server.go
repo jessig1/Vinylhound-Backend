@@ -71,7 +71,7 @@ type FavoritesService interface {
 // SearchService provides unified search across music providers.
 type SearchService interface {
 	Search(ctx context.Context, opts searchservice.SearchOptions) (*searchservice.SearchResults, error)
-	ImportAlbumForUser(ctx context.Context, token string, albumID string, provider musicapi.MusicProvider) error
+	ImportAlbumForUser(ctx context.Context, token string, albumID string, provider musicapi.MusicProvider) (int64, error)
 	ImportAlbum(ctx context.Context, albumID string, provider musicapi.MusicProvider) error
 	GetArtistWithAlbums(ctx context.Context, artistID string) (*musicapi.Artist, []musicapi.Album, error)
 	GetAlbumWithTracks(ctx context.Context, albumID string) (*musicapi.Album, []musicapi.Track, error)
@@ -104,6 +104,17 @@ type ConcertService interface {
 	MarkAttended(ctx context.Context, token string, concertID int64, rating *int) error
 }
 
+// CollectionService coordinates album collection operations (wishlist and owned)
+type CollectionService interface {
+	Add(ctx context.Context, token string, collection *models.AlbumCollection) (*models.AlbumCollection, error)
+	List(ctx context.Context, token string, filter models.CollectionFilter) ([]*models.AlbumCollectionWithDetails, error)
+	Get(ctx context.Context, id int64) (*models.AlbumCollectionWithDetails, error)
+	Update(ctx context.Context, token string, id int64, collection *models.AlbumCollection) (*models.AlbumCollection, error)
+	Remove(ctx context.Context, token string, id int64) error
+	Move(ctx context.Context, token string, id int64, targetType models.CollectionType) error
+	GetStats(ctx context.Context, token string) (*models.CollectionStats, error)
+}
+
 // Server wires HTTP handlers to the underlying services.
 type Server struct {
 	users         UserService
@@ -116,6 +127,7 @@ type Server struct {
 	searchService SearchService
 	places        PlaceService
 	concerts      ConcertService
+	collections   CollectionService
 }
 
 // New configures a Server with the given Store implementation.
@@ -130,6 +142,7 @@ func New(
 	searchService SearchService,
 	places PlaceService,
 	concerts ConcertService,
+	collections CollectionService,
 ) *Server {
 	return &Server{
 		users:         users,
@@ -142,6 +155,7 @@ func New(
 		searchService: searchService,
 		places:        places,
 		concerts:      concerts,
+		collections:   collections,
 	}
 }
 
@@ -213,6 +227,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PUT /api/v1/concerts/{id}", s.handleUpdateConcert)
 	mux.HandleFunc("DELETE /api/v1/concerts/{id}", s.handleDeleteConcert)
 	mux.HandleFunc("POST /api/v1/concerts/{id}/attend", s.handleMarkConcertAttended)
+
+	// Collection routes (album wishlist and owned)
+	mux.HandleFunc("/api/v1/collections", s.handleCollections)
+	mux.HandleFunc("/api/v1/collections/", s.handleCollection)
+	mux.HandleFunc("/api/v1/collections/stats", s.handleCollectionStats)
 
 	// Legacy routes (for backward compatibility) - TODO: Remove after frontend migration
 	mux.HandleFunc("/api/signup", s.handleSignup)

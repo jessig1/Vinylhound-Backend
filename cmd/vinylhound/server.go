@@ -8,6 +8,7 @@ import (
 
 	"vinylhound/internal/app/albums"
 	"vinylhound/internal/app/artists"
+	"vinylhound/internal/app/collections"
 	"vinylhound/internal/app/concerts"
 	"vinylhound/internal/app/favorites"
 	"vinylhound/internal/app/places"
@@ -40,7 +41,10 @@ func newHTTPHandler(cfg Config, db *sql.DB, dataStore *store.Store) http.Handler
 	// Concert service (depends on places service)
 	concertsSvc := concerts.New(dataStore, placesSvc)
 
-	return withCORS(cfg.AllowedOrigins, httpapi.New(userSvc, artistSvc, albumSvc, songSvc, ratingsSvc, playlistSvc, favoritesSvc, searchSvc, placesSvc, concertsSvc).Routes())
+	// Collection service
+	collectionsSvc := collections.New(dataStore)
+
+	return withCORS(cfg.AllowedOrigins, httpapi.New(userSvc, artistSvc, albumSvc, songSvc, ratingsSvc, playlistSvc, favoritesSvc, searchSvc, placesSvc, concertsSvc, collectionsSvc).Routes())
 }
 
 func newSearchService(cfg Config, db *sql.DB, dataStore *store.Store) *searchservice.Service {

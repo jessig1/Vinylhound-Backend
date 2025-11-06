@@ -111,7 +111,8 @@ func (s *Server) handleImportAlbum(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("ImportAlbum: attempting import album=%s provider=%s", req.AlbumID, provider)
 
-	if err := s.searchService.ImportAlbumForUser(r.Context(), token, req.AlbumID, provider); err != nil {
+	dbAlbumID, err := s.searchService.ImportAlbumForUser(r.Context(), token, req.AlbumID, provider)
+	if err != nil {
 		if errors.Is(err, store.ErrUnauthorized) {
 			log.Printf("ImportAlbum: unauthorized import attempt for album=%s provider=%s", req.AlbumID, provider)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -124,11 +125,29 @@ func (s *Server) handleImportAlbum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("ImportAlbum: completed import album=%s provider=%s", req.AlbumID, provider)
+	log.Printf("ImportAlbum: completed import album=%s provider=%s database_id=%d", req.AlbumID, provider, dbAlbumID)
+
+	// Retrieve the stored album to return full details
+	album, err := s.albums.Get(r.Context(), dbAlbumID)
+	if err != nil {
+		log.Printf("ImportAlbum: ERROR - failed to retrieve stored album id=%d: %v", dbAlbumID, err)
+		// Return success but with just the ID since the album was imported
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Album imported successfully",
+			"album": map[string]interface{}{
+				"id": dbAlbumID,
+			},
+		})
+		return
+	}
+
+	log.Printf("ImportAlbum: returning album details id=%d title=%q artist=%q", album.ID, album.Title, album.Artist)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Album imported successfully",
+		"album":   album,
 	})
 }
 

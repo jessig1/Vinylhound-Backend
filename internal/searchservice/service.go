@@ -265,29 +265,30 @@ func (s *Service) ImportAlbum(ctx context.Context, albumID string, provider musi
 }
 
 // ImportAlbumForUser fetches a full album and stores it (and its tracks) for the authenticated user.
-func (s *Service) ImportAlbumForUser(ctx context.Context, token string, albumID string, provider musicapi.MusicProvider) error {
+// Returns the database album ID and any error encountered.
+func (s *Service) ImportAlbumForUser(ctx context.Context, token string, albumID string, provider musicapi.MusicProvider) (int64, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return store.ErrUnauthorized
+		return 0, store.ErrUnauthorized
 	}
 	if s.store == nil {
 		log.Println("ImportAlbumForUser: store not configured")
-		return errors.New("store not configured")
+		return 0, errors.New("store not configured")
 	}
 
 	userID, err := s.store.UserIDByToken(ctx, token)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	client, err := s.clientForProvider(provider)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	album, tracks, err := client.GetAlbum(ctx, albumID)
 	if err != nil {
-		return fmt.Errorf("fetch album: %w", err)
+		return 0, fmt.Errorf("fetch album: %w", err)
 	}
 
 	log.Printf("ImportAlbumForUser: fetched album=%s provider=%s tracks=%d user=%d", album.Title, provider, len(tracks), userID)
@@ -295,7 +296,7 @@ func (s *Service) ImportAlbumForUser(ctx context.Context, token string, albumID 
 	storedAlbumID, err := s.storeAlbumForUser(ctx, userID, *album, tracks)
 	if err != nil {
 		log.Printf("ImportAlbumForUser: failed storing album user=%d album=%s: %v", userID, album.Title, err)
-		return err
+		return 0, err
 	}
 
 	for _, track := range tracks {
@@ -304,8 +305,8 @@ func (s *Service) ImportAlbumForUser(ctx context.Context, token string, albumID 
 		}
 	}
 
-	log.Printf("Imported album: %s by %s with %d tracks for user %d", album.Title, album.Artist, len(tracks), userID)
-	return nil
+	log.Printf("Imported album: %s by %s with %d tracks for user %d (database ID: %d)", album.Title, album.Artist, len(tracks), userID, storedAlbumID)
+	return storedAlbumID, nil
 }
 
 // Helper functions
