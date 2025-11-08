@@ -111,7 +111,8 @@ func (s *Server) handleImportAlbum(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("ImportAlbum: attempting import album=%s provider=%s", req.AlbumID, provider)
 
-	if err := s.searchService.ImportAlbumForUser(r.Context(), token, req.AlbumID, provider); err != nil {
+	dbAlbumID, err := s.searchService.ImportAlbumForUser(r.Context(), token, req.AlbumID, provider)
+	if err != nil {
 		if errors.Is(err, store.ErrUnauthorized) {
 			log.Printf("ImportAlbum: unauthorized import attempt for album=%s provider=%s", req.AlbumID, provider)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -124,11 +125,29 @@ func (s *Server) handleImportAlbum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("ImportAlbum: completed import album=%s provider=%s", req.AlbumID, provider)
+	log.Printf("ImportAlbum: completed import album=%s provider=%s database_id=%d", req.AlbumID, provider, dbAlbumID)
+
+	// Retrieve the stored album to return full details
+	album, err := s.albums.Get(r.Context(), dbAlbumID)
+	if err != nil {
+		log.Printf("ImportAlbum: ERROR - failed to retrieve stored album id=%d: %v", dbAlbumID, err)
+		// Return success but with just the ID since the album was imported
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Album imported successfully",
+			"album": map[string]interface{}{
+				"id": dbAlbumID,
+			},
+		})
+		return
+	}
+
+	log.Printf("ImportAlbum: returning album details id=%d title=%q artist=%q", album.ID, album.Title, album.Artist)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Album imported successfully",
+		"album":   album,
 	})
 }
 
@@ -193,6 +212,78 @@ func (s *Server) handleGetArtist(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"artist": artist,
 		"albums": albums,
+	})
+}
+
+// handleArtists handles both GET (list artists) and POST (save artist)
+func (s *Server) handleArtists(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[handleArtists] Method: %s, Path: %s", r.Method, r.URL.Path)
+	switch r.Method {
+	case http.MethodGet:
+		s.handleListArtists(w, r)
+	case http.MethodPost:
+		s.handleSaveArtist(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleListArtists retrieves all artists from the database
+func (s *Server) handleListArtists(w http.ResponseWriter, r *http.Request) {
+	artists, err := s.searchService.GetAllArtists(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"artists": artists,
+	})
+}
+
+// handleSaveArtist saves an artist to the database
+func (s *Server) handleSaveArtist(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ExternalID  string   `json:"external_id"`
+		Name        string   `json:"name"`
+		Provider    string   `json:"provider"`
+		ImageURL    string   `json:"image_url"`
+		Biography   string   `json:"biography"`
+		Genres      []string `json:"genres"`
+		Popularity  int      `json:"popularity"`
+		ExternalURL string   `json:"external_url"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" {
+		http.Error(w, "Artist name is required", http.StatusBadRequest)
+		return
+	}
+
+	artist := musicapi.Artist{
+		ExternalID:  req.ExternalID,
+		Name:        req.Name,
+		Provider:    musicapi.MusicProvider(req.Provider),
+		ImageURL:    req.ImageURL,
+		Biography:   req.Biography,
+		Genres:      req.Genres,
+		Popularity:  req.Popularity,
+		ExternalURL: req.ExternalURL,
+	}
+
+	if err := s.searchService.SaveArtist(r.Context(), artist); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Artist saved successfully",
 	})
 }
 
