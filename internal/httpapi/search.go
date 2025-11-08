@@ -215,6 +215,78 @@ func (s *Server) handleGetArtist(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleArtists handles both GET (list artists) and POST (save artist)
+func (s *Server) handleArtists(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[handleArtists] Method: %s, Path: %s", r.Method, r.URL.Path)
+	switch r.Method {
+	case http.MethodGet:
+		s.handleListArtists(w, r)
+	case http.MethodPost:
+		s.handleSaveArtist(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleListArtists retrieves all artists from the database
+func (s *Server) handleListArtists(w http.ResponseWriter, r *http.Request) {
+	artists, err := s.searchService.GetAllArtists(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"artists": artists,
+	})
+}
+
+// handleSaveArtist saves an artist to the database
+func (s *Server) handleSaveArtist(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ExternalID  string   `json:"external_id"`
+		Name        string   `json:"name"`
+		Provider    string   `json:"provider"`
+		ImageURL    string   `json:"image_url"`
+		Biography   string   `json:"biography"`
+		Genres      []string `json:"genres"`
+		Popularity  int      `json:"popularity"`
+		ExternalURL string   `json:"external_url"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" {
+		http.Error(w, "Artist name is required", http.StatusBadRequest)
+		return
+	}
+
+	artist := musicapi.Artist{
+		ExternalID:  req.ExternalID,
+		Name:        req.Name,
+		Provider:    musicapi.MusicProvider(req.Provider),
+		ImageURL:    req.ImageURL,
+		Biography:   req.Biography,
+		Genres:      req.Genres,
+		Popularity:  req.Popularity,
+		ExternalURL: req.ExternalURL,
+	}
+
+	if err := s.searchService.SaveArtist(r.Context(), artist); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Artist saved successfully",
+	})
+}
+
 // handleGetAlbumDetails retrieves full album details including all tracks from Spotify
 func (s *Server) handleGetAlbumDetails(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

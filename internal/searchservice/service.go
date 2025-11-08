@@ -201,27 +201,75 @@ func (s *Service) storeResults(ctx context.Context, results *SearchResults) erro
 
 // storeArtist stores an artist in the database if it doesn't exist
 func (s *Service) storeArtist(ctx context.Context, artist musicapi.Artist) error {
-	// Check if artist already exists
-	var exists bool
-	err := s.db.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM artists WHERE name = $1)`,
-		artist.Name).Scan(&exists)
+	// Check if artist already exists by external_id and provider
+	if artist.ExternalID != "" && artist.Provider != "" {
+		var exists bool
+		err := s.db.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM artists WHERE external_id = $1 AND provider = $2)`,
+			artist.ExternalID, artist.Provider).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("check artist exists: %w", err)
+		}
+
+		if exists {
+			// Update existing artist with latest data
+			genresJSON, err := json.Marshal(artist.Genres)
+			if err != nil {
+				return fmt.Errorf("marshal genres: %w", err)
+			}
+
+			_, err = s.db.ExecContext(ctx, `
+				UPDATE artists
+				SET biography = $1,
+				    image_url = $2,
+				    genres = $3::jsonb,
+				    popularity = $4,
+				    external_url = $5,
+				    updated_at = $6
+				WHERE external_id = $7 AND provider = $8`,
+				artist.Biography,
+				artist.ImageURL,
+				string(genresJSON),
+				artist.Popularity,
+				artist.ExternalURL,
+				time.Now().UTC(),
+				artist.ExternalID,
+				artist.Provider,
+			)
+
+			if err != nil {
+				log.Printf("Failed to update artist %s: %v", artist.Name, err)
+			}
+			return nil
+		}
+	}
+
+	// Insert new artist with all fields
+	genresJSON, err := json.Marshal(artist.Genres)
 	if err != nil {
-		return fmt.Errorf("check artist exists: %w", err)
+		return fmt.Errorf("marshal genres: %w", err)
 	}
 
-	if exists {
-		return nil // Already exists
-	}
-
-	// Insert new artist
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO artists (name, biography, image_url, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $4)
-		ON CONFLICT (name) DO NOTHING`,
+		INSERT INTO artists (name, biography, image_url, external_id, provider, genres, popularity, external_url, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $9)
+		ON CONFLICT (name) DO UPDATE SET
+			biography = EXCLUDED.biography,
+			image_url = EXCLUDED.image_url,
+			external_id = EXCLUDED.external_id,
+			provider = EXCLUDED.provider,
+			genres = EXCLUDED.genres,
+			popularity = EXCLUDED.popularity,
+			external_url = EXCLUDED.external_url,
+			updated_at = EXCLUDED.updated_at`,
 		artist.Name,
 		artist.Biography,
 		artist.ImageURL,
+		artist.ExternalID,
+		artist.Provider,
+		string(genresJSON),
+		artist.Popularity,
+		artist.ExternalURL,
 		time.Now().UTC(),
 	)
 
@@ -518,4 +566,64 @@ func (s *Service) GetAlbumWithTracks(ctx context.Context, albumID string) (*musi
 	}
 
 	return album, tracks, nil
+}
+
+// GetAllArtists retrieves all artists from the database
+func (s *Service) GetAllArtists(ctx context.Context) ([]musicapi.Artist, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			COALESCE(external_id, '') as external_id,
+			name,
+			COALESCE(provider, '') as provider,
+			COALESCE(image_url, '') as image_url,
+			COALESCE(biography, '') as biography,
+			COALESCE(genres, '[]'::jsonb) as genres,
+			COALESCE(popularity, 0) as popularity,
+			COALESCE(external_url, '') as external_url
+		FROM artists
+		ORDER BY name ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query artists: %w", err)
+	}
+	defer rows.Close()
+
+	var artists []musicapi.Artist
+	for rows.Next() {
+		var artist musicapi.Artist
+		var genresJSON string
+
+		err := rows.Scan(
+			&artist.ExternalID,
+			&artist.Name,
+			&artist.Provider,
+			&artist.ImageURL,
+			&artist.Biography,
+			&genresJSON,
+			&artist.Popularity,
+			&artist.ExternalURL,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan artist: %w", err)
+		}
+
+		// Parse genres JSON
+		if err := json.Unmarshal([]byte(genresJSON), &artist.Genres); err != nil {
+			log.Printf("Failed to parse genres for artist %s: %v", artist.Name, err)
+			artist.Genres = []string{}
+		}
+
+		artists = append(artists, artist)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return artists, nil
+}
+
+// SaveArtist stores an artist in the database (public wrapper for storeArtist)
+func (s *Service) SaveArtist(ctx context.Context, artist musicapi.Artist) error {
+	return s.storeArtist(ctx, artist)
 }

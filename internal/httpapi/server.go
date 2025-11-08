@@ -75,6 +75,8 @@ type SearchService interface {
 	ImportAlbum(ctx context.Context, albumID string, provider musicapi.MusicProvider) error
 	GetArtistWithAlbums(ctx context.Context, artistID string) (*musicapi.Artist, []musicapi.Album, error)
 	GetAlbumWithTracks(ctx context.Context, albumID string) (*musicapi.Album, []musicapi.Track, error)
+	GetAllArtists(ctx context.Context) ([]musicapi.Artist, error)
+	SaveArtist(ctx context.Context, artist musicapi.Artist) error
 }
 
 // PlaceService coordinates place-related operations (venues and retailers)
@@ -205,6 +207,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/v1/providers", s.handleProviders)
 	mux.HandleFunc("/api/v1/artist", s.handleGetArtist)
 	mux.HandleFunc("/api/v1/album/details", s.handleGetAlbumDetails)
+	mux.HandleFunc("/api/v1/artists", s.handleArtists)
 
 	// Venue routes
 	mux.HandleFunc("POST /api/v1/venues", s.handleCreateVenue)
